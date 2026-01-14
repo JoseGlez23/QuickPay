@@ -108,9 +108,7 @@ export default function OrderStatusScreen({ route, navigation }) {
   };
 
   const navigateToHome = () => {
-    navigation.navigate('ClientTabs', {
-    screen: 'ClientHome',
-  });
+    navigation.navigate('Home');
   };
 
   return (
@@ -294,15 +292,7 @@ export default function OrderStatusScreen({ route, navigation }) {
               <Text style={styles.secondaryActionText}>Ver recibo</Text>
             </TouchableOpacity>
             
-            <TouchableOpacity style={[styles.actionButton, styles.secondaryAction]}>
-              <Icon name="help" size={20} color="#3B82F6" />
-              <Text style={styles.secondaryActionText}>Ayuda</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={[styles.actionButton, styles.secondaryAction]}>
-              <Icon name="rate-review" size={20} color="#3B82F6" />
-              <Text style={styles.secondaryActionText}>Calificar</Text>
-            </TouchableOpacity>
+           
           </View>
         </View>
       </ScrollView>

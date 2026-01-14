@@ -709,7 +709,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     backgroundColor: '#FFF',
-    flexDirection: 'row',
+    //flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
@@ -730,6 +730,7 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: 'bold',
     color: '#111827',
+     marginHorizontal: 90,
   },
   actionButtons: {
     flexDirection: 'row',
