@@ -249,8 +249,8 @@ export default function OrderHistoryScreen({ navigation }) {
       </Animated.View>
 
       {/* Filter Chips */}
-      <ScrollView 
-        horizontal 
+      <ScrollView
+        horizontal
         showsHorizontalScrollIndicator={false}
         style={styles.filterScroll}
         contentContainerStyle={styles.filterContainer}
@@ -362,7 +362,9 @@ const styles = StyleSheet.create({
   },
   filterContainer: {
     paddingHorizontal: 15,
-    paddingVertical: 10,
+    paddingVertical: 20,
+    gap: 8,
+    alignItems: 'center',
   },
   filterChip: {
     paddingHorizontal: 20,
@@ -371,9 +373,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#F3F4F6',
     borderWidth: 1,
     borderColor: '#E5E7EB',
-    marginRight: 10,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 38,
+    flexShrink: 0,
   },
   filterChipActive: {
     backgroundColor: '#3B82F6',

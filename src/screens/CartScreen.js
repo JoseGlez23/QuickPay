@@ -108,7 +108,7 @@ export default function CartScreen({ navigation }) {
           </Text>
           <TouchableOpacity 
             style={styles.shopButton}
-            onPress={() => navigation.navigate('Home')}
+            onPress={() => navigation.navigate('ClientHome')}
           >
             <Icon name="shopping-bag" size={20} color="#FFFFFF" />
             <Text style={styles.shopButtonText}>Descubrir productos</Text>

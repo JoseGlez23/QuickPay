@@ -180,6 +180,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 80,
+    paddingTop: 20,
   },
   header: {
     backgroundColor: '#3B82F6',
@@ -201,7 +202,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 25,
-    marginTop: -20,
+    marginTop: 0,
     marginHorizontal: 20,
     borderRadius: 20,
     elevation: 5,

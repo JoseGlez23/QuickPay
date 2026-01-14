@@ -98,7 +98,7 @@ export default function ClientDashboard({ navigation }) {
           
          <TouchableOpacity 
   style={styles.headerIconButton} 
-  onPress={() => navigation.navigate('Cart')}
+  onPress={() => navigation.navigate('ClientCart')}
 >
           
             <View>
