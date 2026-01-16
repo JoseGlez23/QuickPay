@@ -20,6 +20,7 @@ import ProfileScreen from "../screens/ProfileScreen";
 import AddProductScreen from "../screens/AddProductScreen";
 import ProviderOrders from "../screens/ProviderOrders";
 import ProviderProfileScreen from "../screens/ProviderProfileScreen";
+import ProviderProductsScreen from "../screens/ProviderProductsScreen";
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -120,7 +121,7 @@ function ProviderTabs() {
       />
       <Tab.Screen 
         name="ProviderProducts" 
-        component={AddProductScreen}
+        component={ProviderProductsScreen}
         options={{ title: "Productos" }}
       />
       <Tab.Screen 
@@ -159,7 +160,7 @@ export default function AppNavigator() {
         />
       ) : user.role === "client" ? (
         // Usuario autenticado como CLIENTE
-        <>
+        <Stack.Group>
           <Stack.Screen 
             name="ClientTabs" 
             component={ClientTabs}
@@ -189,10 +190,10 @@ export default function AppNavigator() {
               title: "Pago",
             }}
           />
-        </>
+        </Stack.Group>
       ) : (
         // Usuario autenticado como PROVEEDOR
-        <>
+        <Stack.Group>
           <Stack.Screen 
             name="ProviderTabs" 
             component={ProviderTabs}
@@ -206,7 +207,7 @@ export default function AppNavigator() {
               title: "Agregar Producto",
             }}
           />
-        </>
+        </Stack.Group>
       )}
     </Stack.Navigator>
   );

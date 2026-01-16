@@ -108,7 +108,7 @@ export default function OrderStatusScreen({ route, navigation }) {
   };
 
   const navigateToHome = () => {
-    navigation.navigate('Home');
+    navigation.navigate('ClientTabs', { screen: 'ClientHome' },);
   };
 
   return (

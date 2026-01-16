@@ -248,7 +248,7 @@ export default function CartScreen({ navigation }) {
           
           <TouchableOpacity 
             style={styles.continueShoppingBtn}
-            onPress={() => navigation.navigate('Home')}
+            onPress={() => navigation.navigate('ClientTabs', {screen: 'ClientHome'})}
           >
             <Icon name="add-shopping-cart" size={20} color="#3B82F6" />
             <Text style={styles.continueShoppingText}>Seguir comprando</Text>

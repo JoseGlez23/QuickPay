@@ -1,3 +1,4 @@
+// src/screens/ProfileScreen.js
 import React from 'react';
 import {
   View,
@@ -7,12 +8,10 @@ import {
   ScrollView,
   SafeAreaView,
   StatusBar,
-  Image,
   Alert,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { useAuth } from '../context/AuthContext';
-import BottomNav from '../components/BottomNav';
 
 const menuItems = [
   { icon: 'person', label: 'Información personal', screen: 'ProfileInfo' },
@@ -28,7 +27,7 @@ const menuItems = [
 export default function ProfileScreen({ navigation }) {
   const { user, logout } = useAuth();
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     Alert.alert(
       "Cerrar sesión",
       "¿Estás seguro que quieres cerrar sesión?",
@@ -37,9 +36,10 @@ export default function ProfileScreen({ navigation }) {
         { 
           text: "Cerrar sesión", 
           style: "destructive",
-          onPress: () => {
-            logout();
-            navigation.replace('Auth');
+          onPress: async () => {
+            // Solo llamamos a logout, NO navegamos manualmente
+            await logout();
+            // El AppNavigator se actualizará automáticamente cuando user sea null
           }
         }
       ]
@@ -47,12 +47,11 @@ export default function ProfileScreen({ navigation }) {
   };
 
   const navigateToScreen = (screen) => {
-    // Aquí puedes manejar la navegación a diferentes pantallas
     Alert.alert("Próximamente", `Pantalla ${screen} en desarrollo`);
   };
 
   const navigateToOrders = () => {
-    navigation.navigate('Orders');
+    navigation.navigate('ClientOrders');
   };
 
   return (
@@ -168,7 +167,6 @@ export default function ProfileScreen({ navigation }) {
           <Text style={styles.appRights}>© 2023 MiTienda. Todos los derechos reservados.</Text>
         </View>
       </ScrollView>
-      
     </SafeAreaView>
   );
 }

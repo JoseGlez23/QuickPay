@@ -196,7 +196,9 @@ export default function ProductDetailScreen({ route, navigation }) {
         { text: "Seguir comprando", onPress: () => navigation.goBack() },
         { 
           text: "Ver Carrito", 
-          onPress: () => navigation.navigate('Cart') 
+          onPress: () => navigation.navigate('ClientTabs', {
+            screen: 'ClientCart',
+          }) 
         }
       ]
     );

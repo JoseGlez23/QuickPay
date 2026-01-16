@@ -1,10 +1,5 @@
 // src/context/AuthContext.js
-import React, {
-  createContext,
-  useState,
-  useContext,
-  useEffect,
-} from "react";
+import React, { createContext, useState, useContext, useEffect } from "react";
 import { supabase } from "../utils/supabase";
 
 const AuthContext = createContext();
@@ -15,27 +10,77 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [cart, setCart] = useState([]);
 
-  // Función para obtener perfil de usuario
-  const fetchUserProfile = async (userId) => {
+  const fetchUserProfile = async (authUserId) => {
     try {
-      if (!userId) {
+      if (!authUserId) {
         setUser(null);
         return null;
       }
 
-      const { data: profile, error } = await supabase
+      console.log("Buscando perfil para auth_id:", authUserId);
+
+      let { data: profile, error } = await supabase
         .from("users")
         .select("*")
-        .eq("id", userId)
+        .eq("auth_id", authUserId)
         .maybeSingle();
 
       if (error) {
-        console.error("Error obteniendo perfil:", error);
-        setUser(null);
-        return null;
+        console.error("Error buscando perfil por auth_id:", error);
+        const { data: profileById } = await supabase
+          .from("users")
+          .select("*")
+          .eq("id", authUserId)
+          .maybeSingle();
+        profile = profileById;
       }
 
-      if (profile) {
+      if (!profile) {
+        console.log("Usuario no encontrado, creando nuevo perfil...");
+        
+        const { data: authUser } = await supabase.auth.getUser();
+        
+        if (authUser?.user) {
+          const newUserData = {
+            auth_id: authUser.user.id,
+            email: authUser.user.email,
+            name: authUser.user.user_metadata?.name || authUser.user.email?.split("@")[0],
+            role: authUser.user.user_metadata?.role || "client",
+          };
+
+          console.log("Creando usuario con datos:", newUserData);
+
+          const { data: newProfile, error: createError } = await supabase
+            .from("users")
+            .insert([newUserData])
+            .select()
+            .single();
+
+          if (createError) {
+            console.error("Error creando usuario:", createError);
+            throw createError;
+          }
+
+          if (newProfile) {
+            console.log("Usuario creado exitosamente:", newProfile.id);
+            setUser(newProfile);
+            return newProfile;
+          }
+        }
+      } else {
+        if (!profile.auth_id) {
+          console.log("Actualizando usuario con auth_id...");
+          const { error: updateError } = await supabase
+            .from("users")
+            .update({ auth_id: authUserId })
+            .eq("id", profile.id);
+
+          if (updateError) {
+            console.error("Error actualizando auth_id:", updateError);
+          }
+        }
+
+        console.log("Usuario encontrado:", profile.id);
         setUser(profile);
         return profile;
       }
@@ -43,20 +88,19 @@ export const AuthProvider = ({ children }) => {
       return null;
     } catch (error) {
       console.error("Error en fetchUserProfile:", error);
-      setUser(null);
       return null;
     }
   };
 
-  // Inicializar autenticación
   useEffect(() => {
     const initializeAuth = async () => {
       try {
         setLoading(true);
-        
-        // Obtener sesión actual
-        const { data: { session: currentSession }, error } = 
-          await supabase.auth.getSession();
+
+        const {
+          data: { session: currentSession },
+          error,
+        } = await supabase.auth.getSession();
 
         if (error) {
           console.error("Error obteniendo sesión:", error);
@@ -83,33 +127,32 @@ export const AuthProvider = ({ children }) => {
 
     initializeAuth();
 
-    // Escuchar cambios en autenticación
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, newSession) => {
-        console.log("Auth state changed:", event);
-        setSession(newSession);
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+      console.log("Auth state changed:", event);
+      setSession(newSession);
 
-        if (newSession?.user) {
-          await fetchUserProfile(newSession.user.id);
-        } else {
-          setUser(null);
-          setCart([]);
-        }
-        setLoading(false);
+      if (newSession?.user) {
+        await fetchUserProfile(newSession.user.id);
+      } else {
+        setUser(null);
+        setCart([]);
       }
-    );
+      setLoading(false);
+    });
 
     return () => {
       subscription?.unsubscribe();
     };
   }, []);
 
-  // Registro
   const signUp = async (email, password, name, role = "client") => {
     try {
       setLoading(true);
 
-      // Registrar en Supabase Auth
+      console.log("Registrando usuario:", { email, name, role });
+
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
@@ -131,18 +174,17 @@ export const AuthProvider = ({ children }) => {
         throw new Error(errorMessage);
       }
 
-      // Si el registro requiere confirmación de email
       if (!authData.user?.confirmed_at) {
         return {
           success: true,
-          message: "¡Registro exitoso! Por favor verifica tu email.",
+          message: "Registro exitoso! Por favor verifica tu email.",
           needsEmailVerification: true,
         };
       }
 
-      // Si el email ya estaba verificado, crear perfil automáticamente
+      console.log("Creando usuario en tabla users...");
       const newUserData = {
-        id: authData.user.id,
+        auth_id: authData.user.id,
         email: email,
         name: name,
         role: role,
@@ -155,15 +197,20 @@ export const AuthProvider = ({ children }) => {
         .single();
 
       if (userError) {
-        console.warn("No se pudo crear perfil:", userError);
-      } else {
-        setUser(userData);
+        console.error("Error creando usuario en tabla:", userError);
+        
+        setTimeout(() => fetchUserProfile(authData.user.id), 1000);
+        
+        throw new Error("Error completando registro. Por favor intenta iniciar sesión.");
       }
+
+      console.log("Usuario creado en tabla:", userData.id);
+      setUser(userData);
 
       return {
         success: true,
-        message: "¡Registro completado exitosamente!",
-        user: userData || newUserData,
+        message: "Registro completado exitosamente!",
+        user: userData,
       };
     } catch (error) {
       console.error("Error en signUp:", error);
@@ -176,10 +223,11 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Login
   const signIn = async (email, password) => {
     try {
       setLoading(true);
+
+      console.log("Intentando login para:", email);
 
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
@@ -198,23 +246,23 @@ export const AuthProvider = ({ children }) => {
         throw new Error(errorMessage);
       }
 
-      // Obtener perfil del usuario
-      const { data: profile } = await supabase
-        .from("users")
-        .select("*")
-        .eq("id", data.user.id)
-        .single();
-
-      setUser(profile || {
-        id: data.user.id,
-        email: data.user.email,
-        name: data.user.user_metadata?.name || data.user.email?.split("@")[0],
-        role: data.user.user_metadata?.role || "client",
-      });
+      console.log("Login exitoso, buscando perfil...");
+      
+      const profile = await fetchUserProfile(data.user.id);
+      
+      if (!profile) {
+        console.warn("No se pudo obtener/crear perfil, usando datos básicos");
+        setUser({
+          id: data.user.id,
+          email: data.user.email,
+          name: data.user.user_metadata?.name || data.user.email?.split("@")[0],
+          role: data.user.user_metadata?.role || "client",
+        });
+      }
 
       return {
         success: true,
-        message: "¡Inicio de sesión exitoso!",
+        message: "Inicio de sesión exitoso!",
       };
     } catch (error) {
       console.error("Error en signIn:", error);
@@ -227,24 +275,34 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Logout
   const logout = async () => {
     try {
       setLoading(true);
-      await supabase.auth.signOut();
+
+      const { error } = await supabase.auth.signOut();
+
+      if (error) {
+        console.error("Error cerrando sesión en Supabase:", error);
+        throw error;
+      }
+
       setUser(null);
       setSession(null);
       setCart([]);
+
+      console.log("Sesión cerrada exitosamente");
       return { success: true };
     } catch (error) {
       console.error("Error en logout:", error);
-      return { success: false, error: error.message };
+      return {
+        success: false,
+        error: error.message || "Error al cerrar sesión",
+      };
     } finally {
       setLoading(false);
     }
   };
 
-  // Actualizar perfil
   const updateProfile = async (updates) => {
     try {
       if (!user) {
@@ -270,7 +328,46 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Funciones del carrito
+  const migrateUser = async () => {
+    try {
+      const { data: authUser } = await supabase.auth.getUser();
+      if (!authUser?.user) return { success: false, error: "No autenticado" };
+
+      console.log("Migrando usuario:", authUser.user.id);
+      
+      const { data: existing } = await supabase
+        .from("users")
+        .select("*")
+        .eq("auth_id", authUser.user.id)
+        .maybeSingle();
+
+      if (existing) {
+        return { success: true, message: "Usuario ya migrado", user: existing };
+      }
+
+      const newUserData = {
+        auth_id: authUser.user.id,
+        email: authUser.user.email,
+        name: authUser.user.user_metadata?.name || authUser.user.email?.split("@")[0],
+        role: authUser.user.user_metadata?.role || "client",
+      };
+
+      const { data: newUser, error } = await supabase
+        .from("users")
+        .insert([newUserData])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setUser(newUser);
+      return { success: true, user: newUser };
+    } catch (error) {
+      console.error("Error migrando usuario:", error);
+      return { success: false, error: error.message };
+    }
+  };
+
   const addToCart = (product, quantity = 1) => {
     setCart((prev) => {
       const exists = prev.find((item) => item.id === product.id);
@@ -311,29 +408,22 @@ export const AuthProvider = ({ children }) => {
 
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0);
 
-  // Valor del contexto
   const value = {
-    // Estado
     user,
     session,
     loading,
     cart,
     cartTotal,
     cartCount,
-
-    // Autenticación
     signUp,
     signIn,
     logout,
     updateProfile,
-
-    // Carrito
+    migrateUser,
     addToCart,
     removeFromCart,
     updateQuantity,
     clearCart,
-
-    // Utilitarios
     isAuthenticated: !!user,
     userRole: user?.role || "guest",
   };

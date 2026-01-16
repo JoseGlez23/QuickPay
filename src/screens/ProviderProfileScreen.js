@@ -8,11 +8,11 @@ import {
   ScrollView,
   SafeAreaView,
   StatusBar,
+  Alert
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { useAuth } from '../context/AuthContext';
 import { useProducts } from '../context/ProductContext';
-import BottomNav from '../components/BottomNav';
 import { COLORS, FONT_SIZES, FONT_WEIGHTS, SPACING } from '../constants/theme';
 
 const menuItems = [
@@ -48,18 +48,29 @@ export default function ProviderProfileScreen({ navigation }) {
     } else if (tab === 'products') {
       navigation.navigate('AddProduct');
     }
-    // 'profile' ya está en ProviderProfileScreen
   };
 
   const handleLogout = () => {
-    logout();
-    navigation.replace('Auth');
+    Alert.alert(
+      "Cerrar sesión",
+      "¿Estás seguro que quieres cerrar sesión?",
+      [
+        { text: "Cancelar", style: "cancel" },
+        { 
+          text: "Cerrar sesión", 
+          style: "destructive",
+          onPress: async () => {
+            // SOLO llamamos a logout, NO navegamos manualmente
+            await logout();
+            // El AppNavigator se actualizará automáticamente cuando user sea null
+          }
+        }
+      ]
+    );
   };
 
   const navigateToScreen = (screen) => {
-    // Aquí puedes manejar la navegación a cada pantalla
     console.log(`Navegando a: ${screen}`);
-    // Por ahora, solo mostramos alerta
     alert(`Navegando a: ${screen}`);
   };
 
