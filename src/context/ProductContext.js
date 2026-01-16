@@ -26,7 +26,7 @@ export const ProductProvider = ({ children }) => {
         console.error("Error inicializando categorías:", error);
       }
     };
-    
+
     initCategories();
   }, []);
 
@@ -60,12 +60,12 @@ export const ProductProvider = ({ children }) => {
   const formatProductToSupabase = async (product) => {
     try {
       const categoryId = await getCategoryId(product.category);
-      
+
       if (!categoryId) {
         console.error("Categoría no encontrada:", product.category);
         throw new Error(`Categoría "${product.category}" no encontrada`);
       }
-      
+
       return {
         provider_id: product.providerId,
         name: product.name.trim(),
@@ -75,7 +75,8 @@ export const ProductProvider = ({ children }) => {
           ? parseFloat(product.discountPrice)
           : null,
         category_id: categoryId,
-        images: product.images && product.images.length > 0 ? product.images : null,
+        images:
+          product.images && product.images.length > 0 ? product.images : null,
         stock: parseInt(product.stock) || 10,
         is_active: product.isActive !== undefined ? product.isActive : true,
       };
@@ -199,7 +200,9 @@ export const ProductProvider = ({ children }) => {
 
       if (userError || !userCheck) {
         console.error("Usuario no válido en tabla users:", userError);
-        throw new Error("Usuario no válido. Por favor cierra sesión y vuelve a entrar.");
+        throw new Error(
+          "Usuario no válido. Por favor cierra sesión y vuelve a entrar."
+        );
       }
 
       console.log("Usuario verificado:", userCheck.id);
@@ -211,11 +214,13 @@ export const ProductProvider = ({ children }) => {
 
       console.log("Datos del producto:", finalProductData);
 
-      const productForSupabase = await formatProductToSupabase(finalProductData);
+      const productForSupabase = await formatProductToSupabase(
+        finalProductData
+      );
 
       console.log("Creando producto en Supabase:", {
         ...productForSupabase,
-        provider_id: user.id
+        provider_id: user.id,
       });
 
       const { data, error: supabaseError } = await supabase
@@ -226,11 +231,16 @@ export const ProductProvider = ({ children }) => {
 
       if (supabaseError) {
         console.error("Error agregando producto:", supabaseError);
-        
-        if (supabaseError.code === "23503" && supabaseError.message.includes("provider_id")) {
-          throw new Error(`Error: El usuario con ID ${user.id} no existe en la tabla users. Por favor cierra sesión y vuelve a entrar.`);
+
+        if (
+          supabaseError.code === "23503" &&
+          supabaseError.message.includes("provider_id")
+        ) {
+          throw new Error(
+            `Error: El usuario con ID ${user.id} no existe en la tabla users. Por favor cierra sesión y vuelve a entrar.`
+          );
         }
-        
+
         setError(supabaseError.message);
         return {
           success: false,
