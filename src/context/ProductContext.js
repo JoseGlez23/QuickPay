@@ -1,4 +1,3 @@
-// src/context/ProductContext.js
 import React, {
   createContext,
   useContext,
@@ -39,7 +38,8 @@ export const ProductProvider = ({ children }) => {
       description: product.description || "",
       images: product.images || [],
       stock: product.stock || 0,
-      category: product.category_id || "other",
+      category: product.category?.name || "other",
+      categoryId: product.category_id,
       createdAt: product.created_at,
       updatedAt: product.updated_at,
       isActive: product.is_active || true,
@@ -59,11 +59,28 @@ export const ProductProvider = ({ children }) => {
 
   const formatProductToSupabase = async (product) => {
     try {
-      const categoryId = await getCategoryId(product.category);
+      let categoryId = product.categoryId;
+
+      if (!categoryId && product.category && product.category !== "other") {
+        const isUUID =
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            product.category,
+          );
+
+        if (isUUID) {
+          categoryId = product.category;
+        } else {
+          categoryId = await getCategoryId(product.category);
+        }
+      }
 
       if (!categoryId) {
-        console.error("Categoría no encontrada:", product.category);
-        throw new Error(`Categoría "${product.category}" no encontrada`);
+        const defaultCategoryId = await getCategoryId("other");
+        if (defaultCategoryId) {
+          categoryId = defaultCategoryId;
+        } else {
+          throw new Error("No se pudo obtener categoría por defecto");
+        }
       }
 
       return {
@@ -96,8 +113,9 @@ export const ProductProvider = ({ children }) => {
         .select(
           `
           *,
-          provider:users(name)
-        `
+          provider:users(name),
+          category:categories(name)
+        `,
         )
         .eq("is_active", true)
         .order("created_at", { ascending: false });
@@ -132,11 +150,14 @@ export const ProductProvider = ({ children }) => {
       setLoading(true);
       setError(null);
 
-      console.log("Cargando productos para provider_id:", providerId);
-
       const { data, error: supabaseError } = await supabase
         .from("products")
-        .select("*")
+        .select(
+          `
+          *,
+          category:categories(name)
+        `,
+        )
         .eq("provider_id", providerId)
         .eq("is_active", true)
         .order("created_at", { ascending: false });
@@ -148,7 +169,6 @@ export const ProductProvider = ({ children }) => {
         return [];
       }
 
-      console.log(`Productos cargados: ${data?.length || 0}`);
       const formattedProducts = (data || []).map(formatProductFromSupabase);
       setProducts(formattedProducts);
       return formattedProducts;
@@ -169,8 +189,6 @@ export const ProductProvider = ({ children }) => {
         return;
       }
 
-      console.log("Cargando productos para usuario:", user.id, user.role);
-
       if (user.role === "provider") {
         await loadProviderProducts(user.id);
       } else {
@@ -185,9 +203,6 @@ export const ProductProvider = ({ children }) => {
     try {
       setError(null);
 
-      console.log("Intentando agregar producto...");
-      console.log("Usuario actual:", user);
-
       if (!user?.id) {
         throw new Error("Usuario no autenticado. Por favor inicia sesión.");
       }
@@ -201,27 +216,17 @@ export const ProductProvider = ({ children }) => {
       if (userError || !userCheck) {
         console.error("Usuario no válido en tabla users:", userError);
         throw new Error(
-          "Usuario no válido. Por favor cierra sesión y vuelve a entrar."
+          "Usuario no válido. Por favor cierra sesión y vuelve a entrar.",
         );
       }
-
-      console.log("Usuario verificado:", userCheck.id);
 
       const finalProductData = {
         ...productData,
         providerId: user.id,
       };
 
-      console.log("Datos del producto:", finalProductData);
-
-      const productForSupabase = await formatProductToSupabase(
-        finalProductData
-      );
-
-      console.log("Creando producto en Supabase:", {
-        ...productForSupabase,
-        provider_id: user.id,
-      });
+      const productForSupabase =
+        await formatProductToSupabase(finalProductData);
 
       const { data, error: supabaseError } = await supabase
         .from("products")
@@ -237,7 +242,7 @@ export const ProductProvider = ({ children }) => {
           supabaseError.message.includes("provider_id")
         ) {
           throw new Error(
-            `Error: El usuario con ID ${user.id} no existe en la tabla users. Por favor cierra sesión y vuelve a entrar.`
+            `Error: El usuario con ID ${user.id} no existe en la tabla users. Por favor cierra sesión y vuelve a entrar.`,
           );
         }
 
@@ -316,6 +321,16 @@ export const ProductProvider = ({ children }) => {
       setError(null);
 
       const { id, ...updates } = updatedProduct;
+
+      const currentProduct = products.find((p) => p.id === id);
+      if (!currentProduct) {
+        throw new Error("Producto no encontrado");
+      }
+
+      if (!updates.categoryId && currentProduct.categoryId) {
+        updates.categoryId = currentProduct.categoryId;
+      }
+
       const productForSupabase = await formatProductToSupabase(updates);
 
       const { data, error: supabaseError } = await supabase
@@ -325,7 +340,12 @@ export const ProductProvider = ({ children }) => {
           updated_at: new Date().toISOString(),
         })
         .eq("id", id)
-        .select()
+        .select(
+          `
+          *,
+          category:categories(name)
+        `,
+        )
         .single();
 
       if (supabaseError) {
@@ -339,7 +359,7 @@ export const ProductProvider = ({ children }) => {
 
       const formattedProduct = formatProductFromSupabase(data);
       setProducts((prev) =>
-        prev.map((product) => (product.id === id ? formattedProduct : product))
+        prev.map((product) => (product.id === id ? formattedProduct : product)),
       );
 
       return {

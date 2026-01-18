@@ -1,430 +1,217 @@
 // src/screens/ProviderProfileScreen.js
 import React, { useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  ScrollView,
-  SafeAreaView,
-  StatusBar,
-  Alert
+  View, Text, StyleSheet, TouchableOpacity, ScrollView,
+  SafeAreaView, StatusBar, TextInput, Modal, Platform
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { useAuth } from '../context/AuthContext';
-import { useProducts } from '../context/ProductContext';
-import { COLORS, FONT_SIZES, FONT_WEIGHTS, SPACING } from '../constants/theme';
-
-const menuItems = [
-  { icon: 'store', label: 'Información de la tienda', screen: 'StoreInfo' },
-  { icon: 'payment', label: 'Métodos de pago', screen: 'PaymentMethods' },
-  { icon: 'analytics', label: 'Estadísticas', screen: 'Analytics' },
-  { icon: 'notifications', label: 'Notificaciones', screen: 'Notifications' },
-  { icon: 'security', label: 'Seguridad', screen: 'Security' },
-  { icon: 'settings', label: 'Configuración', screen: 'Settings' },
-  { icon: 'help', label: 'Ayuda y soporte', screen: 'Help' },
-  { icon: 'info', label: 'Acerca de QuickPay', screen: 'About' },
-];
+import { useTheme } from '../context/ThemeContext';
 
 export default function ProviderProfileScreen({ navigation }) {
   const { user, logout } = useAuth();
-  const { products: allProducts } = useProducts();
-  const [activeTab, setActiveTab] = useState('profile');
-
-  // Filtrar productos del proveedor actual
-  const myProducts = allProducts.filter(p => p.providerId === user?.id);
+  const { colors, isDarkMode } = useTheme();
   
-  // Calcular estadísticas del proveedor
-  const totalProducts = myProducts.length;
-  const estimatedSales = myProducts.reduce((sum, p) => sum + (p.price * 10), 0);
-  const averageRating = 4.8;
+  const [isEditing, setIsEditing] = useState(false);
+  const [name, setName] = useState(user?.name || 'Mi Tienda S.A.');
+  const [modalVisible, setModalVisible] = useState(false);
+  const [modalConfig, setModalConfig] = useState({ 
+    title: '', message: '', icon: 'info', confirmText: 'Aceptar', onConfirm: () => {} 
+  });
 
-  const handleTabChange = (tab) => {
-    setActiveTab(tab);
-    if (tab === 'home') {
-      navigation.navigate('ProviderDashboard');
-    } else if (tab === 'orders') {
-      navigation.navigate('ProviderOrders');
-    } else if (tab === 'products') {
-      navigation.navigate('AddProduct');
-    }
+  // Obtener la inicial del nombre
+  const getInitial = () => {
+    if (name) return name.charAt(0).toUpperCase();
+    if (user?.email) return user.email.charAt(0).toUpperCase();
+    return "P";
+  };
+
+  const showCustomAlert = (title, message, icon, onConfirm, confirmText = 'Confirmar') => {
+    setModalConfig({
+      title, message, icon, confirmText,
+      onConfirm: () => { setModalVisible(false); if (onConfirm) onConfirm(); },
+    });
+    setModalVisible(true);
   };
 
   const handleLogout = () => {
-    Alert.alert(
+    showCustomAlert(
       "Cerrar sesión",
-      "¿Estás seguro que quieres cerrar sesión?",
-      [
-        { text: "Cancelar", style: "cancel" },
-        { 
-          text: "Cerrar sesión", 
-          style: "destructive",
-          onPress: async () => {
-            // SOLO llamamos a logout, NO navegamos manualmente
-            await logout();
-            // El AppNavigator se actualizará automáticamente cuando user sea null
-          }
-        }
-      ]
+      "¿Estás seguro que deseas salir? Tendrás que ingresar tus credenciales nuevamente.",
+      "logout",
+      async () => await logout(),
+      "Cerrar Sesión"
     );
   };
 
-  const navigateToScreen = (screen) => {
-    console.log(`Navegando a: ${screen}`);
-    alert(`Navegando a: ${screen}`);
-  };
-
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={COLORS.primary} />
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
       
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Icon name="arrow-back" size={24} color={COLORS.white} />
-        </TouchableOpacity>
-        <View style={styles.headerTitleContainer}>
-          <Text style={styles.headerTitle}>Mi Perfil</Text>
-          <Text style={styles.headerSubtitle}>Proveedor</Text>
+      {/* POP UP PERSONALIZADO */}
+      <Modal animationType="fade" transparent={true} visible={modalVisible}>
+        <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0,0,0,0.6)' }]}>
+          <View style={[styles.modalContent, { backgroundColor: colors.card }]}>
+            <View style={[styles.modalIconContainer, { backgroundColor: modalConfig.icon === 'logout' ? (isDarkMode ? '#451a1a' : '#FEF2F2') : (isDarkMode ? '#1e3a8a' : '#EFF6FF') }]}>
+              <Icon 
+                name={modalConfig.icon} 
+                size={40} 
+                color={modalConfig.icon === 'logout' ? '#EF4444' : colors.primary} 
+              />
+            </View>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>{modalConfig.title}</Text>
+            <Text style={[styles.modalMessage, { color: colors.textSecondary }]}>{modalConfig.message}</Text>
+            
+            <View style={styles.modalButtonsRow}>
+              <TouchableOpacity 
+                style={[styles.modalCancelButton, { backgroundColor: isDarkMode ? '#333' : '#F3F4F6' }]} 
+                onPress={() => setModalVisible(false)}
+              >
+                <Text style={[styles.modalCancelText, { color: colors.textSecondary }]}>Cancelar</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.modalConfirmButton, { backgroundColor: modalConfig.icon === 'logout' ? '#DC2626' : colors.primary }]}
+                onPress={modalConfig.onConfirm}
+              >
+                <Text style={styles.modalConfirmText}>{modalConfig.confirmText}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
-        <View style={styles.headerRight} />
+      </Modal>
+
+      {/* Header Fijo */}
+      <View style={[styles.header, { backgroundColor: colors.primary }]}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Icon name="arrow-back" size={24} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Perfil de Proveedor</Text>
+        <TouchableOpacity onPress={() => setIsEditing(!isEditing)} style={styles.editButton}>
+          <Text style={styles.editText}>{isEditing ? 'Guardar' : 'Editar'}</Text>
+        </TouchableOpacity>
       </View>
 
-      <ScrollView 
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-      >
-        {/* User Info Card */}
-        <View style={styles.userCard}>
-          <View style={styles.userAvatar}>
-            <Icon name="store" size={40} color={COLORS.primary} />
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        
+        {/* Tarjeta de Perfil con INICIAL */}
+        <View style={[styles.userCard, { backgroundColor: colors.card }]}>
+          <View style={styles.avatarWrapper}>
+            <View style={[styles.userAvatar, { backgroundColor: colors.primary, borderColor: isDarkMode ? '#444' : '#fff' }]}>
+              <Text style={styles.avatarInitial}>{getInitial()}</Text>
+            </View>
           </View>
+
           <View style={styles.userInfo}>
-            <Text style={styles.userName}>{user?.name || 'Mi Tienda'}</Text>
-            <Text style={styles.userEmail}>{user?.email || 'proveedor@quickpay.com'}</Text>
-            <View style={styles.userTypeBadge}>
-              <Text style={styles.userTypeText}>Cuenta de Proveedor</Text>
+            {isEditing ? (
+              <TextInput
+                style={[styles.inputActive, { 
+                    backgroundColor: isDarkMode ? '#1a1a1a' : '#F3F4F6', 
+                    color: colors.text, 
+                    borderBottomColor: colors.primary 
+                }]}
+                value={name}
+                onChangeText={setName}
+                placeholderTextColor={colors.textSecondary}
+                autoFocus
+              />
+            ) : (
+              <Text style={[styles.userName, { color: colors.text }]}>{name}</Text>
+            )}
+            
+            <View style={styles.emailBadge}>
+              <Icon name="email" size={14} color={colors.textSecondary} />
+              <Text style={[styles.userEmail, { color: colors.textSecondary }]}>{user?.email || 'proveedor@quickpay.com'}</Text>
+            </View>
+
+            <View style={[styles.statusBadge, { backgroundColor: isDarkMode ? '#064e3b' : '#ECFDF5' }]}>
+              <Text style={[styles.statusText, { color: '#10b981' }]}>CUENTA VERIFICADA</Text>
             </View>
           </View>
         </View>
 
-        {/* Stats Cards */}
-        <View style={styles.statsContainer}>
-          <View style={styles.statCard}>
-            <View style={[styles.statIcon, { backgroundColor: '#EFF6FF' }]}>
-              <Icon name="inventory" size={24} color={COLORS.primary} />
-            </View>
-            <Text style={styles.statValue}>{totalProducts}</Text>
-            <Text style={styles.statLabel}>Productos</Text>
-          </View>
-          
-          <View style={styles.statCard}>
-            <View style={[styles.statIcon, { backgroundColor: '#F0FDF4' }]}>
-              <Icon name="attach-money" size={24} color="#10B981" />
-            </View>
-            <Text style={styles.statValue}>${estimatedSales.toLocaleString()}</Text>
-            <Text style={styles.statLabel}>Ventas</Text>
-          </View>
-          
-          <View style={styles.statCard}>
-            <View style={[styles.statIcon, { backgroundColor: '#FEF3C7' }]}>
-              <Icon name="star" size={24} color="#F59E0B" />
-            </View>
-            <Text style={styles.statValue}>{averageRating}</Text>
-            <Text style={styles.statLabel}>Calificación</Text>
+        {/* Sección: Ubicación */}
+        <View style={[styles.section, { backgroundColor: colors.card }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Ubicación</Text>
+          <View style={styles.locationRow}>
+            <Icon name="location-on" size={20} color={colors.primary} />
+            <Text style={[styles.locationText, { color: colors.textSecondary }]}>
+              San Luis Río Colorado, Sonora, México.
+            </Text>
           </View>
         </View>
 
-        {/* Quick Actions */}
-        <View style={styles.quickActions}>
+        {/* Botón de Logout */}
+        <View style={styles.logoutWrapper}>
           <TouchableOpacity 
-            style={styles.quickAction}
-            onPress={() => navigation.navigate('AddProduct')}
-          >
-            <View style={[styles.actionIcon, { backgroundColor: '#EFF6FF' }]}>
-              <Icon name="add-box" size={24} color={COLORS.primary} />
-            </View>
-            <Text style={styles.actionText}>Agregar Producto</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.quickAction}
-            onPress={() => navigation.navigate('ProviderOrders')}
-          >
-            <View style={[styles.actionIcon, { backgroundColor: '#F0FDF4' }]}>
-              <Icon name="list-alt" size={24} color="#10B981" />
-            </View>
-            <Text style={styles.actionText}>Ver Pedidos</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Menu Items */}
-        <View style={styles.menuContainer}>
-          <Text style={styles.menuTitle}>Configuración</Text>
-          
-          {menuItems.map((item, index) => (
-            <TouchableOpacity
-              key={item.label}
-              style={[
-                styles.menuItem,
-                index !== menuItems.length - 1 && styles.menuItemBorder
-              ]}
-              onPress={() => navigateToScreen(item.screen)}
-            >
-              <View style={styles.menuItemLeft}>
-                <View style={[styles.menuIcon, { backgroundColor: '#F3F4F6' }]}>
-                  <Icon name={item.icon} size={20} color="#6B7280" />
-                </View>
-                <Text style={styles.menuItemText}>{item.label}</Text>
-              </View>
-              <Icon name="chevron-right" size={20} color="#9CA3AF" />
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Logout Button */}
-        <View style={styles.logoutContainer}>
-          <TouchableOpacity 
-            style={styles.logoutButton} 
+            style={[styles.logoutButton, { backgroundColor: colors.card, borderColor: isDarkMode ? '#451a1a' : '#FCA5A5' }]} 
             onPress={handleLogout}
           >
             <Icon name="logout" size={20} color="#DC2626" />
-            <Text style={styles.logoutText}>Cerrar sesión</Text>
+            <Text style={styles.logoutText}>Cerrar sesión de la cuenta</Text>
           </TouchableOpacity>
+          <Text style={[styles.footerNote, { color: colors.textSecondary }]}>QuickPay Business v1.0.0</Text>
         </View>
+
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
-  },
-  scrollContent: {
-    paddingBottom: 80,
-  },
+  container: { flex: 1 },
+  modalOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalContent: { width: '90%', borderRadius: 24, padding: 24, alignItems: 'center', elevation: 20 },
+  modalIconContainer: { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' },
+  modalMessage: { fontSize: 15, textAlign: 'center', lineHeight: 22, marginBottom: 24 },
+  modalButtonsRow: { flexDirection: 'row', width: '100%', gap: 12 },
+  modalCancelButton: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
+  modalCancelText: { fontWeight: '600', fontSize: 15 },
+  modalConfirmButton: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
+  modalConfirmText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
+  scrollContent: { paddingBottom: 40 },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    paddingTop: StatusBar.currentHeight + 10,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 18,
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 10 : 20,
   },
-  backButton: {
-    padding: SPACING.xs,
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
+  backButton: { padding: 4 },
+  editButton: { paddingVertical: 4, paddingHorizontal: 10 },
+  editText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
+  userCard: { padding: 24, margin: 16, borderRadius: 20, alignItems: 'center', elevation: 3 },
+  avatarWrapper: { marginBottom: 16 },
+  userAvatar: { 
+    width: 100, 
+    height: 100, 
+    borderRadius: 50, 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    borderWidth: 3,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
   },
-  headerTitleContainer: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  headerTitle: {
-    fontSize: FONT_SIZES.xl,
-    fontWeight: FONT_WEIGHTS.bold,
+  avatarInitial: {
+    fontSize: 42,
+    fontWeight: 'bold',
     color: '#fff',
-    marginBottom: 2,
+    letterSpacing: 1
   },
-  headerSubtitle: {
-    fontSize: FONT_SIZES.sm,
-    color: 'rgba(255,255,255,0.8)',
-  },
-  headerRight: {
-    width: 40,
-  },
-  userCard: {
-    backgroundColor: '#fff',
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: SPACING.xl,
-    marginHorizontal: SPACING.md,
-    marginTop: SPACING.lg,
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  userAvatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#EFF6FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-  },
-  userInfo: {
-    flex: 1,
-  },
-  userName: {
-    fontSize: FONT_SIZES.xl,
-    fontWeight: FONT_WEIGHTS.bold,
-    color: '#1F2937',
-    marginBottom: 4,
-  },
-  userEmail: {
-    fontSize: FONT_SIZES.sm,
-    color: '#6B7280',
-    marginBottom: 8,
-  },
-  userTypeBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#EFF6FF',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  userTypeText: {
-    fontSize: FONT_SIZES.xs,
-    color: COLORS.primary,
-    fontWeight: FONT_WEIGHTS.medium,
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: SPACING.md,
-    marginTop: SPACING.lg,
-    gap: SPACING.sm,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: SPACING.md,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
-  },
-  statIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: SPACING.sm,
-  },
-  statValue: {
-    fontSize: FONT_SIZES.xl,
-    fontWeight: FONT_WEIGHTS.bold,
-    color: '#1F2937',
-    marginBottom: 2,
-  },
-  statLabel: {
-    fontSize: FONT_SIZES.xs,
-    color: '#6B7280',
-  },
-  quickActions: {
-    flexDirection: 'row',
-    paddingHorizontal: SPACING.md,
-    marginTop: SPACING.lg,
-    gap: SPACING.sm,
-  },
-  quickAction: {
-    flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: SPACING.md,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
-  },
-  actionIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: SPACING.sm,
-  },
-  actionText: {
-    fontSize: FONT_SIZES.sm,
-    color: '#1F2937',
-    fontWeight: FONT_WEIGHTS.medium,
-    textAlign: 'center',
-  },
-  menuContainer: {
-    backgroundColor: '#fff',
-    marginHorizontal: SPACING.md,
-    marginTop: SPACING.lg,
-    borderRadius: 16,
-    padding: SPACING.md,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  menuTitle: {
-    fontSize: FONT_SIZES.lg,
-    fontWeight: FONT_WEIGHTS.bold,
-    color: '#1F2937',
-    marginBottom: SPACING.md,
-    paddingHorizontal: SPACING.xs,
-  },
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: SPACING.md,
-  },
-  menuItemBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  menuItemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  menuIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-  },
-  menuItemText: {
-    fontSize: FONT_SIZES.md,
-    color: '#1F2937',
-    flex: 1,
-  },
-  logoutContainer: {
-    paddingHorizontal: SPACING.md,
-    marginTop: SPACING.lg,
-    marginBottom: SPACING.xl,
-  },
-  logoutButton: {
-    backgroundColor: '#fff',
-    borderWidth: 2,
-    borderColor: '#DC2626',
-    borderRadius: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: SPACING.lg,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  logoutText: {
-    fontSize: FONT_SIZES.md,
-    fontWeight: '600',
-    color: '#DC2626',
-    marginLeft: SPACING.sm,
-  },
+  userInfo: { alignItems: 'center', width: '100%' },
+  userName: { fontSize: 20, fontWeight: 'bold' },
+  emailBadge: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
+  userEmail: { fontSize: 14, marginLeft: 6 },
+  inputActive: { width: '85%', borderRadius: 8, padding: 10, textAlign: 'center', fontSize: 18, borderBottomWidth: 2 },
+  statusBadge: { marginTop: 16, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  statusText: { fontSize: 10, fontWeight: '800' },
+  section: { marginHorizontal: 16, marginBottom: 12, padding: 18, borderRadius: 16 },
+  sectionTitle: { fontSize: 15, fontWeight: 'bold', marginBottom: 16 },
+  locationRow: { flexDirection: 'row', alignItems: 'center' },
+  locationText: { marginLeft: 10, fontSize: 14 },
+  logoutWrapper: { marginTop: 24, paddingHorizontal: 16, alignItems: 'center' },
+  logoutButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%', padding: 16, borderRadius: 12, borderWidth: 1 },
+  logoutText: { marginLeft: 8, color: '#DC2626', fontWeight: 'bold', fontSize: 15 },
+  footerNote: { marginTop: 12, fontSize: 11 },
 });

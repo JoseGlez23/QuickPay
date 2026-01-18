@@ -202,10 +202,7 @@ export default function AppNavigator() {
           <Stack.Screen 
             name="AddProduct" 
             component={AddProductScreen}
-            options={{
-              headerShown: true,
-              title: "Agregar Producto",
-            }}
+            
           />
         </Stack.Group>
       )}

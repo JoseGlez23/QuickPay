@@ -5,20 +5,23 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'react-native';
 import { AuthProvider } from './src/context/AuthContext';
 import { ProductProvider } from './src/context/ProductContext';
+import { ThemeProvider } from './src/context/ThemeContext'; // Importa el nuevo contexto
 import AppNavigator from './src/navigation/AppNavigator';
 import { COLORS } from './src/constants/theme';
 
 export default function App() {
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
-      <AuthProvider>
-        <ProductProvider>
-          <NavigationContainer>
-            <AppNavigator />
-          </NavigationContainer>
-        </ProductProvider>
-      </AuthProvider>
+      {/* Envolvemos todo con ThemeProvider */}
+      <ThemeProvider>
+        <AuthProvider>
+          <ProductProvider>
+            <NavigationContainer>
+              <AppNavigator />
+            </NavigationContainer>
+          </ProductProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </SafeAreaProvider>
   );
 }
