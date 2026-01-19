@@ -1,3 +1,4 @@
+// src/screens/ProviderProductsScreen.js
 import React, { useState, useRef, useEffect } from "react";
 import {
   View,
@@ -23,17 +24,19 @@ import * as ImagePicker from "expo-image-picker";
 import { useAuth } from "../context/AuthContext";
 import { useProducts } from "../context/ProductContext";
 import { useTheme } from "../context/ThemeContext";
+import { getCategoriesList } from "../utils/categoryUtils";
+import * as FileSystem from 'expo-file-system';
+import { decode } from 'base64-arraybuffer';
+import { v4 as uuidv4 } from 'uuid';
 
 const { width } = Dimensions.get("window");
 
-// Función para formatear precios con comas
+// Función para formatear precios
 const formatPrice = (price) => {
   if (!price && price !== 0) return "$0.00";
-
   const formatted = parseFloat(price).toFixed(2);
   const parts = formatted.split(".");
   const integerPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-
   return `$${integerPart}.${parts[1]}`;
 };
 
@@ -77,19 +80,31 @@ export default function ProviderProductsScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [editModalVisible, setEditModalVisible] = useState(false);
+  
+  // Estado para categorías
+  const [categories, setCategories] = useState([]);
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
 
-  // FORMULARIO DE EDICIÓN MEJORADO
+  // FORMULARIO DE EDICIÓN
   const [editForm, setEditForm] = useState({
     name: "",
     price: "",
     stock: "",
     description: "",
     images: [],
+    categoryId: "",
+    categoryName: "",
   });
   const [updating, setUpdating] = useState(false);
+  const [uploadingImages, setUploadingImages] = useState(false);
 
   const statusColors = getStatusColors(isDarkMode);
   const bgAnim = useRef(new Animated.Value(0)).current;
+
+  // Cargar categorías al iniciar
+  useEffect(() => {
+    loadCategories();
+  }, []);
 
   useEffect(() => {
     setProducts(myProducts);
@@ -110,6 +125,35 @@ export default function ProviderProductsScreen({ navigation }) {
       ]),
     ).start();
   }, [myProducts, user?.id]);
+
+  const loadCategories = async () => {
+    try {
+      const data = await getCategoriesList();
+      const formatted = data.map(c => ({
+        id: c.id,
+        name: c.name,
+        description: c.description,
+        icon: getCategoryIcon(c.name)
+      }));
+      setCategories(formatted);
+    } catch (error) {
+      console.error("Error cargando categorías:", error);
+    }
+  };
+
+  const getCategoryIcon = (categoryName) => {
+    switch (categoryName?.toLowerCase()) {
+      case "computers": return "laptop";
+      case "electronics": return "cellphone-link";
+      case "phones": return "cellphone";
+      case "home": return "home-variant";
+      case "toys": return "controller-classic";
+      case "fashion": return "tshirt-crew";
+      case "books": return "book-open-variant";
+      case "sports": return "basketball";
+      default: return "tag-outline";
+    }
+  };
 
   const filterProducts = (
     productList,
@@ -134,7 +178,58 @@ export default function ProviderProductsScreen({ navigation }) {
     setRefreshing(false);
   };
 
-  // FUNCIÓN PARA SELECCIONAR MÚLTIPLES IMÁGENES
+  // SUBIR IMÁGENES A SUPABASE
+  const uploadImagesToSupabase = async (imageUris, productId) => {
+    setUploadingImages(true);
+    const uploadedUrls = [];
+    
+    for (const imageUri of imageUris) {
+      // Si ya es una URL de Supabase, mantenerla
+      if (imageUri.startsWith('https://') && imageUri.includes('supabase')) {
+        uploadedUrls.push(imageUri);
+        continue;
+      }
+      
+      try {
+        console.log(`📤 Subiendo imagen para producto ${productId}...`);
+        
+        // Convertir a base64
+        const base64 = await FileSystem.readAsStringAsync(imageUri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        
+        // Generar nombre único
+        const fileName = `products/${user.id}/${productId}/${uuidv4()}.jpg`;
+        
+        // Subir a Supabase
+        const { error: uploadError } = await supabase.storage
+          .from('product-images')
+          .upload(fileName, decode(base64), {
+            contentType: 'image/jpeg'
+          });
+        
+        if (uploadError) {
+          console.error("Error subiendo imagen:", uploadError);
+          continue;
+        }
+        
+        // Obtener URL pública
+        const { data: urlData } = supabase.storage
+          .from('product-images')
+          .getPublicUrl(fileName);
+        
+        uploadedUrls.push(urlData.publicUrl);
+        console.log(`✅ Imagen subida: ${urlData.publicUrl}`);
+      } catch (error) {
+        console.error("Error procesando imagen:", error);
+      }
+    }
+    
+    setUploadingImages(false);
+    return uploadedUrls;
+  };
+
+  // SELECCIONAR NUEVAS IMÁGENES
   const pickEditImages = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
@@ -171,7 +266,7 @@ export default function ProviderProductsScreen({ navigation }) {
     }
   };
 
-  // FUNCIÓN PARA ELIMINAR UNA IMAGEN DEL ARRAY
+  // ELIMINAR IMAGEN
   const removeImage = (indexToRemove) => {
     const newImages = editForm.images.filter(
       (_, index) => index !== indexToRemove,
@@ -179,6 +274,7 @@ export default function ProviderProductsScreen({ navigation }) {
     setEditForm({ ...editForm, images: newImages });
   };
 
+  // ABRIR EDICIÓN
   const handleEdit = (product) => {
     setSelectedProduct(product);
     setEditForm({
@@ -187,59 +283,118 @@ export default function ProviderProductsScreen({ navigation }) {
       stock: product.stock.toString(),
       description: product.description || "",
       images: product.images || [],
+      categoryId: product.categoryId || "",
+      categoryName: product.category || "other",
     });
     setEditModalVisible(true);
   };
 
+  // GUARDAR CAMBIOS
   const handleSaveEdit = async () => {
     if (!selectedProduct) return;
 
-    if (!editForm.name.trim()) {
-      Alert.alert("Error", "El nombre del producto es requerido");
-      return;
+    // Validaciones
+    const errors = [];
+    
+    if (!editForm.name || editForm.name.trim() === "") {
+      errors.push("El nombre del producto es requerido");
     }
 
-    if (!editForm.price || parseFloat(editForm.price) <= 0) {
-      Alert.alert("Error", "El precio debe ser mayor a 0");
-      return;
+    const price = parseFloat(editForm.price);
+    if (isNaN(price) || price <= 0) {
+      errors.push("El precio debe ser mayor a 0");
     }
 
-    if (!editForm.stock || parseInt(editForm.stock) < 0) {
-      Alert.alert("Error", "El stock no puede ser negativo");
+    const stock = parseInt(editForm.stock);
+    if (isNaN(stock) || stock < 0) {
+      errors.push("El stock no puede ser negativo");
+    }
+
+    if (editForm.images.length > 5) {
+      errors.push("Máximo 5 imágenes permitidas");
+    }
+
+    if (!editForm.categoryId) {
+      errors.push("Selecciona una categoría");
+    }
+
+    if (errors.length > 0) {
+      Alert.alert("Error", errors.join("\n"));
       return;
     }
 
     setUpdating(true);
+    
     try {
+      console.log("🔄 Actualizando producto...");
+      
+      // Subir imágenes nuevas si las hay
+      let finalImages = editForm.images;
+      const newImages = editForm.images.filter(img => 
+        img.startsWith('file://') || img.startsWith('content://')
+      );
+      
+      if (newImages.length > 0) {
+        console.log(`📤 Subiendo ${newImages.length} nuevas imágenes...`);
+        const uploadedUrls = await uploadImagesToSupabase(newImages, selectedProduct.id);
+        
+        // Reemplazar URLs locales con URLs de Supabase
+        finalImages = editForm.images.map(img => {
+          if (img.startsWith('file://') || img.startsWith('content://')) {
+            const uploadedUrl = uploadedUrls.shift();
+            return uploadedUrl || img;
+          }
+          return img;
+        });
+      }
+      
+      // Preparar datos actualizados
       const updatedProduct = {
         id: selectedProduct.id,
         name: editForm.name.trim(),
-        price: parseFloat(editForm.price),
-        stock: parseInt(editForm.stock),
-        description: editForm.description.trim(),
-        images: editForm.images,
-        category: selectedProduct.category || "other", // Usar la categoría original
+        description: editForm.description.trim() || "",
+        price: price,
+        stock: stock,
+        images: finalImages,
+        categoryId: editForm.categoryId,
+        category: editForm.categoryName,
         providerId: selectedProduct.providerId,
+        isActive: true,
+        discountPrice: selectedProduct.discountPrice || null,
       };
 
-      console.log("Actualizando producto con datos:", updatedProduct);
+      console.log("📦 Datos para actualizar:", {
+        ...updatedProduct,
+        imagesCount: updatedProduct.images.length
+      });
 
+      // Llamar a la función de actualización
       const result = await updateProduct(updatedProduct);
+      
       if (result.success) {
-        Alert.alert("Éxito", "Producto actualizado correctamente");
-        setEditModalVisible(false);
-
-        setProducts((prev) =>
-          prev.map((p) => (p.id === selectedProduct.id ? result.product : p)),
+        Alert.alert(
+          "✅ Éxito", 
+          "Producto actualizado correctamente",
+          [
+            {
+              text: "OK",
+              onPress: () => {
+                setEditModalVisible(false);
+                refreshProducts();
+              }
+            }
+          ]
         );
-
-        await refreshProducts();
       } else {
-        Alert.alert("Error", result.error || "Error al actualizar el producto");
+        console.error("Error del backend:", result.error);
+        Alert.alert(
+          "❌ Error", 
+          result.error || "Error al actualizar el producto. Intenta nuevamente."
+        );
       }
     } catch (e) {
       console.error("Error actualizando producto:", e);
-      Alert.alert("Error", "Ocurrió un error al actualizar");
+      Alert.alert("❌ Error", "Ocurrió un error al actualizar. Por favor, intenta nuevamente.");
     } finally {
       setUpdating(false);
     }
@@ -257,12 +412,12 @@ export default function ProviderProductsScreen({ navigation }) {
           onPress: async () => {
             const result = await deleteProduct(productId);
             if (result.success) {
-              Alert.alert("Éxito", "Producto eliminado correctamente");
+              Alert.alert("✅ Éxito", "Producto eliminado correctamente");
               await refreshProducts();
             } else {
               Alert.alert(
-                "Error",
-                result.error || "Error al eliminar el producto",
+                "❌ Error",
+                result.error || "Error al eliminar el producto"
               );
             }
           },
@@ -307,6 +462,14 @@ export default function ProviderProductsScreen({ navigation }) {
             <Icon name={config.icon} size={12} color={config.color} />
             <Text style={[styles.statusText, { color: config.color }]}>
               {config.label}
+            </Text>
+          </View>
+          
+          {/* Badge de categoría */}
+          <View style={[styles.categoryBadge, { backgroundColor: colors.primary + '20' }]}>
+            <Icon name={getCategoryIcon(item.category)} size={10} color={colors.primary} />
+            <Text style={[styles.categoryBadgeText, { color: colors.primary }]}>
+              {item.category || "Sin categoría"}
             </Text>
           </View>
         </View>
@@ -507,7 +670,7 @@ export default function ProviderProductsScreen({ navigation }) {
               color={isDarkMode ? "#334155" : "#e2e8f0"}
             />
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              No tienes productos registrados
+              {loading ? "Cargando productos..." : "No tienes productos registrados"}
             </Text>
           </View>
         }
@@ -542,7 +705,7 @@ export default function ProviderProductsScreen({ navigation }) {
               style={{ padding: 20 }}
               showsVerticalScrollIndicator={false}
             >
-              {/* SECCIÓN DE IMÁGENES (hasta 5) */}
+              {/* SECCIÓN DE IMÁGENES */}
               <View style={styles.editImagesContainer}>
                 <Text style={[styles.label, { color: colors.textSecondary }]}>
                   Imágenes ({editForm.images.length}/5)
@@ -589,6 +752,76 @@ export default function ProviderProductsScreen({ navigation }) {
                 </Text>
               </View>
 
+              {/* CATEGORÍA */}
+              <Text style={[styles.label, { color: colors.textSecondary }]}>
+                CATEGORÍA
+              </Text>
+              <TouchableOpacity
+                style={[
+                  styles.categorySelector,
+                  { 
+                    backgroundColor: isDarkMode ? "#0f172a" : "#f8fafc",
+                    borderColor: isDarkMode ? "#334155" : "#e2e8f0"
+                  }
+                ]}
+                onPress={() => setShowCategoryDropdown(!showCategoryDropdown)}
+              >
+                <View style={styles.categorySelectorContent}>
+                  <View style={styles.categoryLeft}>
+                    <Icon 
+                      name={getCategoryIcon(editForm.categoryName)} 
+                      size={20} 
+                      color={colors.primary} 
+                    />
+                    <Text style={[styles.categoryText, { color: colors.text, marginLeft: 10 }]}>
+                      {editForm.categoryName || "Seleccionar categoría"}
+                    </Text>
+                  </View>
+                  <Icon name="chevron-down" size={20} color={colors.textSecondary} />
+                </View>
+              </TouchableOpacity>
+
+              {showCategoryDropdown && (
+                <View style={[
+                  styles.categoryDropdown,
+                  { 
+                    backgroundColor: colors.card,
+                    borderColor: isDarkMode ? "#334155" : "#e2e8f0"
+                  }
+                ]}>
+                  <ScrollView style={{ maxHeight: 200 }}>
+                    {categories.map((cat) => (
+                      <TouchableOpacity
+                        key={cat.id}
+                        style={[
+                          styles.categoryOption,
+                          { 
+                            backgroundColor: editForm.categoryId === cat.id ? colors.primary + '20' : 'transparent'
+                          }
+                        ]}
+                        onPress={() => {
+                          setEditForm({
+                            ...editForm,
+                            categoryId: cat.id,
+                            categoryName: cat.description
+                          });
+                          setShowCategoryDropdown(false);
+                        }}
+                      >
+                        <Icon name={cat.icon} size={18} color={colors.textSecondary} />
+                        <Text style={[styles.categoryOptionText, { 
+                          color: editForm.categoryId === cat.id ? colors.primary : colors.text,
+                          marginLeft: 10
+                        }]}>
+                          {cat.description}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
+              {/* NOMBRE */}
               <Text style={[styles.label, { color: colors.textSecondary }]}>
                 Nombre del Producto
               </Text>
@@ -607,6 +840,7 @@ export default function ProviderProductsScreen({ navigation }) {
                 placeholderTextColor={colors.textSecondary}
               />
 
+              {/* PRECIO Y STOCK */}
               <View style={{ flexDirection: "row", gap: 10 }}>
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.label, { color: colors.textSecondary }]}>
@@ -650,6 +884,7 @@ export default function ProviderProductsScreen({ navigation }) {
                 </View>
               </View>
 
+              {/* DESCRIPCIÓN */}
               <Text style={[styles.label, { color: colors.textSecondary }]}>
                 Descripción
               </Text>
@@ -682,7 +917,7 @@ export default function ProviderProductsScreen({ navigation }) {
                   { backgroundColor: isDarkMode ? "#334155" : "#f1f5f9" },
                 ]}
                 onPress={() => setEditModalVisible(false)}
-                disabled={updating}
+                disabled={updating || uploadingImages}
               >
                 <Text
                   style={[
@@ -699,13 +934,13 @@ export default function ProviderProductsScreen({ navigation }) {
                   styles.saveBtn,
                   {
                     backgroundColor: colors.primary,
-                    opacity: updating ? 0.7 : 1,
+                    opacity: (updating || uploadingImages) ? 0.7 : 1,
                   },
                 ]}
                 onPress={handleSaveEdit}
-                disabled={updating}
+                disabled={updating || uploadingImages}
               >
-                {updating ? (
+                {(updating || uploadingImages) ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
                   <Text style={styles.saveBtnText}>Guardar Cambios</Text>
@@ -806,6 +1041,21 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   statusText: { fontSize: 10, fontWeight: "800", textTransform: "uppercase" },
+  categoryBadge: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    gap: 4,
+  },
+  categoryBadgeText: {
+    fontSize: 9,
+    fontWeight: "700",
+  },
   productBody: { padding: 15 },
   row: {
     flexDirection: "row",
@@ -841,7 +1091,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
-  // ESTILOS DEL MODAL MEJORADO
+  // ESTILOS DEL MODAL
   modalOverlay: { flex: 1, justifyContent: "center", padding: 20 },
   modalCard: {
     borderRadius: 24,
@@ -858,7 +1108,7 @@ const styles = StyleSheet.create({
   },
   modalTitle: { fontSize: 18, fontWeight: "800" },
 
-  // Sección de imágenes mejorada
+  // Sección de imágenes
   editImagesContainer: { marginBottom: 20 },
   imagesGrid: {
     flexDirection: "row",
@@ -898,7 +1148,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
-    borderColor: "#3B82F6",
   },
   addImageText: {
     fontSize: 12,
@@ -910,6 +1159,46 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontStyle: "italic",
     textAlign: "center",
+  },
+
+  // Categoría
+  categorySelector: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 15,
+    marginBottom: 15,
+  },
+  categorySelectorContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  categoryLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+  categoryText: {
+    fontSize: 16,
+    fontWeight: "500",
+  },
+  categoryDropdown: {
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 15,
+    maxHeight: 200,
+  },
+  categoryOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+  },
+  categoryOptionText: {
+    fontSize: 14,
+    fontWeight: "500",
+    flex: 1,
   },
 
   label: { fontSize: 12, fontWeight: "700", marginBottom: 8, marginTop: 5 },

@@ -20,22 +20,19 @@ import {
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useAuth } from "../context/AuthContext";
+import { useTheme } from "../context/ThemeContext"; // IMPORTADO
 
 const COLORS = {
   primaryBlue: "#3B82F6",
   primaryBlueLight: "#60A5FA",
   primaryGreen: "#10B981",
   primaryGreenLight: "#34D399",
-  surface: "rgba(255, 255, 255, 0.94)",
-  textPrimary: "#0F172A",
-  textSecondary: "#64748B",
-  border: "#E2E8F0",
   error: "#EF4444",
   success: "#10B981",
 };
 
 // --- FONDO ANIMADO ---
-const AnimatedBackground = () => {
+const AnimatedBackground = ({ themeColors }) => {
   const moveX1 = useRef(new Animated.Value(0)).current;
   const moveY1 = useRef(new Animated.Value(0)).current;
   const moveX2 = useRef(new Animated.Value(0)).current;
@@ -67,7 +64,7 @@ const AnimatedBackground = () => {
 
   return (
     <View style={StyleSheet.absoluteFill}>
-      <View style={{ flex: 1, backgroundColor: "#F8FAFC" }} />
+      <View style={{ flex: 1, backgroundColor: themeColors.background }} />
       <Animated.View
         style={[
           styles.blob,
@@ -101,6 +98,7 @@ const AnimatedBackground = () => {
 };
 
 export default function AuthScreen() {
+  const { colors, isDarkMode } = useTheme(); // USO DE THEMECONTEXT
   const [formData, setFormData] = useState({
     email: "",
     password: "",
@@ -206,7 +204,6 @@ export default function AuthScreen() {
       if (result.success) {
         showPopup(result.message || "¡Operación exitosa!", "success");
         
-        // Limpiar formulario después de éxito
         setFormData({
           email: "",
           password: "",
@@ -214,7 +211,6 @@ export default function AuthScreen() {
           name: "",
         });
         
-        // Si es registro que requiere verificación de email
         if (result.needsEmailVerification) {
           Alert.alert(
             "Verificación requerida",
@@ -239,16 +235,16 @@ export default function AuthScreen() {
     showState,
     setShowState
   ) => (
-    <View style={styles.inputContainer}>
+    <View style={[styles.inputContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
       <Ionicons
         name={icon}
         size={20}
         color={isRegister ? COLORS.primaryGreen : COLORS.primaryBlue}
       />
       <TextInput
-        style={styles.input}
+        style={[styles.input, { color: colors.text }]}
         placeholder={placeholder}
-        placeholderTextColor="#94A3B8"
+        placeholderTextColor={isDarkMode ? "#6B7280" : "#94A3B8"}
         secureTextEntry={isPassword && !showState}
         value={formData[field]}
         onChangeText={(v) => handleInputChange(field, v)}
@@ -264,7 +260,7 @@ export default function AuthScreen() {
           <Ionicons
             name={showState ? "eye" : "eye-off"}
             size={20}
-            color={COLORS.textSecondary}
+            color={colors.textSecondary}
           />
         </TouchableOpacity>
       )}
@@ -272,9 +268,9 @@ export default function AuthScreen() {
   );
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="dark-content" />
-      <AnimatedBackground />
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
+      <AnimatedBackground themeColors={colors} />
 
       {/* POP-UP */}
       <Animated.View
@@ -314,7 +310,12 @@ export default function AuthScreen() {
           <Animated.View
             style={[
               styles.card,
-              { opacity: fadeAnim, transform: [{ scale: cardScale }] },
+              { 
+                opacity: fadeAnim, 
+                transform: [{ scale: cardScale }],
+                backgroundColor: colors.card,
+                borderColor: colors.border 
+              },
             ]}
           >
             <Text
@@ -351,14 +352,15 @@ export default function AuthScreen() {
 
             {isRegister && (
               <View style={styles.roleSection}>
-                <Text style={styles.roleTitle}>¿Qué rol prefieres?</Text>
+                <Text style={[styles.roleTitle, { color: colors.textSecondary }]}>¿Qué rol prefieres?</Text>
                 <View style={styles.roleButtons}>
                   <TouchableOpacity
                     style={[
                       styles.roleBtn,
+                      { borderColor: colors.border },
                       role === "client" && {
                         borderColor: COLORS.primaryBlue,
-                        backgroundColor: "#EFF6FF",
+                        backgroundColor: isDarkMode ? "#1E293B" : "#EFF6FF",
                       },
                     ]}
                     onPress={() => setRole("client")}
@@ -369,7 +371,7 @@ export default function AuthScreen() {
                       color={
                         role === "client"
                           ? COLORS.primaryBlue
-                          : COLORS.textSecondary
+                          : colors.textSecondary
                       }
                     />
                     <Text
@@ -379,7 +381,7 @@ export default function AuthScreen() {
                           color:
                             role === "client"
                               ? COLORS.primaryBlue
-                              : COLORS.textSecondary,
+                              : colors.textSecondary,
                         },
                       ]}
                     >
@@ -389,9 +391,10 @@ export default function AuthScreen() {
                   <TouchableOpacity
                     style={[
                       styles.roleBtn,
+                      { borderColor: colors.border },
                       role === "provider" && {
                         borderColor: COLORS.primaryGreen,
-                        backgroundColor: "#F0FDF4",
+                        backgroundColor: isDarkMode ? "#064E3B" : "#F0FDF4",
                       },
                     ]}
                     onPress={() => setRole("provider")}
@@ -402,7 +405,7 @@ export default function AuthScreen() {
                       color={
                         role === "provider"
                           ? COLORS.primaryGreen
-                          : COLORS.textSecondary
+                          : colors.textSecondary
                       }
                     />
                     <Text
@@ -412,7 +415,7 @@ export default function AuthScreen() {
                           color:
                             role === "provider"
                               ? COLORS.primaryGreen
-                              : COLORS.textSecondary,
+                              : colors.textSecondary,
                         },
                       ]}
                     >
@@ -460,7 +463,7 @@ export default function AuthScreen() {
               }}
               style={styles.switchMode}
             >
-              <Text style={styles.switchText}>
+              <Text style={[styles.switchText, { color: colors.textSecondary }]}>
                 {isRegister ? "¿Ya tienes cuenta? " : "¿Nuevo por aquí? "}
                 <Text
                   style={{
@@ -482,7 +485,7 @@ export default function AuthScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#FFF" },
+  container: { flex: 1 },
   blob: { position: "absolute", borderRadius: 1000 },
   scrollContent: {
     flexGrow: 1,
@@ -493,7 +496,6 @@ const styles = StyleSheet.create({
   logoWrapper: { alignItems: "center", marginBottom: 5 },
   logo: { width: 250, height: 250 },
   card: {
-    backgroundColor: COLORS.surface,
     borderRadius: 30,
     padding: 25,
     elevation: 12,
@@ -501,7 +503,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 20,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.8)",
   },
   title: {
     fontSize: 28,
@@ -512,15 +513,13 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FFF",
     borderWidth: 1.5,
-    borderColor: COLORS.border,
     borderRadius: 16,
     paddingHorizontal: 15,
     height: 58,
     marginBottom: 15,
   },
-  input: { flex: 1, marginLeft: 10, fontSize: 16, color: COLORS.textPrimary },
+  input: { flex: 1, marginLeft: 10, fontSize: 16 },
   popup: {
     position: "absolute",
     left: 20,
@@ -547,7 +546,6 @@ const styles = StyleSheet.create({
   roleTitle: {
     fontSize: 13,
     fontWeight: "700",
-    color: COLORS.textSecondary,
     marginBottom: 10,
     textAlign: "center",
   },
@@ -560,7 +558,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 15,
     borderWidth: 2,
-    borderColor: COLORS.border,
     gap: 8,
   },
   roleBtnText: { fontWeight: "800", fontSize: 13 },
@@ -578,5 +575,5 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   switchMode: { marginTop: 25, alignItems: "center" },
-  switchText: { fontSize: 15, color: COLORS.textSecondary },
+  switchText: { fontSize: 15 },
 });

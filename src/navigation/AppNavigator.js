@@ -1,13 +1,13 @@
-// src/navigation/AppNavigator.js
 import React from "react";
 import { createStackNavigator } from "@react-navigation/stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { useAuth } from "../context/AuthContext";
+import { useTheme } from "../context/ThemeContext";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/MaterialIcons";
-import { COLORS } from "../constants/theme";
 import { View, ActivityIndicator } from "react-native";
 
-// Import screens
+// IMPORTANTE: Verifica que los nombres de archivos sean exactos
 import AuthScreen from "../screens/AuthScreen";
 import ClientDashboard from "../screens/ClientDashboard";
 import ProviderDashboard from "../screens/ProviderDashboard";
@@ -25,53 +25,51 @@ import ProviderProductsScreen from "../screens/ProviderProductsScreen";
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
 
-// Client Tabs Navigator
+// --- NAVEGACIÓN CLIENTE ---
 function ClientTabs() {
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
-        tabBarIcon: ({ focused, color, size }) => {
+        tabBarIcon: ({ color, size }) => {
           let iconName;
-
-          if (route.name === "ClientHome") {
-            iconName = "home";
-          } else if (route.name === "ClientOrders") {
-            iconName = "shopping-bag";
-          } else if (route.name === "ClientCart") {
-            iconName = "shopping-cart";
-          } else if (route.name === "ClientProfile") {
-            iconName = "person";
-          }
-
+          if (route.name === "ClientHome") iconName = "home";
+          else if (route.name === "ClientOrders") iconName = "shopping-bag";
+          else if (route.name === "ClientCart") iconName = "shopping-cart";
+          else if (route.name === "ClientProfile") iconName = "person";
           return <Icon name={iconName} size={size} color={color} />;
         },
-        tabBarActiveTintColor: COLORS.primary,
-        tabBarInactiveTintColor: COLORS.mutedForeground,
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textSecondary,
         tabBarStyle: {
-          height: 60,
-          paddingBottom: 8,
+          backgroundColor: colors.card,
+          borderTopColor: colors.border,
+          height: 60 + insets.bottom,
+          paddingBottom: insets.bottom > 0 ? insets.bottom : 8,
           paddingTop: 8,
         },
         headerShown: false,
       })}
     >
-      <Tab.Screen 
-        name="ClientHome" 
+      <Tab.Screen
+        name="ClientHome"
         component={ClientDashboard}
         options={{ title: "Inicio" }}
       />
-      <Tab.Screen 
-        name="ClientOrders" 
+      <Tab.Screen
+        name="ClientOrders"
         component={OrderHistoryScreen}
-        options={{ title: "Pedidos" }}
+        options={{ title: "Mis Pedidos" }}
       />
-      <Tab.Screen 
-        name="ClientCart" 
+      <Tab.Screen
+        name="ClientCart"
         component={CartScreen}
         options={{ title: "Carrito" }}
       />
-      <Tab.Screen 
-        name="ClientProfile" 
+      <Tab.Screen
+        name="ClientProfile"
         component={ProfileScreen}
         options={{ title: "Perfil" }}
       />
@@ -79,53 +77,51 @@ function ClientTabs() {
   );
 }
 
-// Provider Tabs Navigator
+// --- NAVEGACIÓN PROVEEDOR ---
 function ProviderTabs() {
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
-        tabBarIcon: ({ focused, color, size }) => {
+        tabBarIcon: ({ color, size }) => {
           let iconName;
-
-          if (route.name === "ProviderHome") {
-            iconName = "dashboard";
-          } else if (route.name === "ProviderOrders") {
-            iconName = "list-alt";
-          } else if (route.name === "ProviderProducts") {
-            iconName = "inventory";
-          } else if (route.name === "ProviderProfile") {
-            iconName = "person";
-          }
-
+          if (route.name === "ProviderHome") iconName = "home";
+          else if (route.name === "ProviderOrders") iconName = "list-alt";
+          else if (route.name === "ProviderProducts") iconName = "inventory";
+          else if (route.name === "ProviderProfile") iconName = "person";
           return <Icon name={iconName} size={size} color={color} />;
         },
-        tabBarActiveTintColor: COLORS.primary,
-        tabBarInactiveTintColor: COLORS.mutedForeground,
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textSecondary,
         tabBarStyle: {
-          height: 60,
-          paddingBottom: 8,
+          backgroundColor: colors.card,
+          borderTopColor: colors.border,
+          height: 60 + insets.bottom,
+          paddingBottom: insets.bottom > 0 ? insets.bottom : 8,
           paddingTop: 8,
         },
         headerShown: false,
       })}
     >
-      <Tab.Screen 
-        name="ProviderHome" 
+      <Tab.Screen
+        name="ProviderHome"
         component={ProviderDashboard}
-        options={{ title: "Dashboard" }}
+        options={{ title: "Inicio" }}
       />
-      <Tab.Screen 
-        name="ProviderOrders" 
+      <Tab.Screen
+        name="ProviderOrders"
         component={ProviderOrders}
         options={{ title: "Pedidos" }}
       />
-      <Tab.Screen 
-        name="ProviderProducts" 
+      <Tab.Screen
+        name="ProviderProducts"
         component={ProviderProductsScreen}
         options={{ title: "Productos" }}
       />
-      <Tab.Screen 
-        name="ProviderProfile" 
+      <Tab.Screen
+        name="ProviderProfile"
         component={ProviderProfileScreen}
         options={{ title: "Perfil" }}
       />
@@ -133,15 +129,22 @@ function ProviderTabs() {
   );
 }
 
-// Main App Navigator
+// --- NAVEGADOR PRINCIPAL ---
 export default function AppNavigator() {
   const { user, loading } = useAuth();
+  const { colors } = useTheme();
 
-  // Mostrar loading mientras se verifica la sesión
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
+      <View
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          alignItems: "center",
+          backgroundColor: colors.background,
+        }}
+      >
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
@@ -150,61 +153,65 @@ export default function AppNavigator() {
     <Stack.Navigator
       screenOptions={{
         headerShown: false,
+        cardStyle: { backgroundColor: colors.background },
+        headerStyle: {
+          backgroundColor: colors.card,
+          elevation: 0,
+          shadowOpacity: 0,
+          borderBottomWidth: 1,
+          borderBottomColor: colors.border,
+        },
+        headerTintColor: colors.text,
       }}
     >
       {!user ? (
-        // Usuario NO autenticado
-        <Stack.Screen 
-          name="Auth" 
-          component={AuthScreen}
-        />
+        <Stack.Screen name="Auth" component={AuthScreen} />
       ) : user.role === "client" ? (
-        // Usuario autenticado como CLIENTE
-        <Stack.Group>
-          <Stack.Screen 
-            name="ClientTabs" 
-            component={ClientTabs}
-          />
-          {/* Pantallas adicionales para clientes (fuera de tabs) */}
-          <Stack.Screen 
-            name="ProductDetail" 
+        <>
+          {/* Pantallas del cliente */}
+          <Stack.Screen name="ClientTabs" component={ClientTabs} />
+          <Stack.Screen
+            name="ProductDetail"
             component={ProductDetailScreen}
             options={{
               headerShown: true,
               title: "Detalle del Producto",
+              headerBackTitle: "Atrás",
             }}
           />
-          <Stack.Screen 
-            name="OrderStatus" 
+          <Stack.Screen
+            name="OrderStatus"
             component={OrderStatusScreen}
             options={{
               headerShown: true,
               title: "Estado del Pedido",
+              headerBackTitle: "Atrás",
             }}
           />
-          <Stack.Screen 
-            name="Payment" 
+          <Stack.Screen
+            name="Payment"
             component={PaymentScreen}
             options={{
               headerShown: true,
-              title: "Pago",
+              title: "Finalizar Compra",
+              headerBackTitle: "Carrito",
             }}
           />
-        </Stack.Group>
+        </>
       ) : (
-        // Usuario autenticado como PROVEEDOR
-        <Stack.Group>
-          <Stack.Screen 
-            name="ProviderTabs" 
-            component={ProviderTabs}
-          />
-          {/* Pantallas adicionales para proveedores (fuera de tabs) */}
-          <Stack.Screen 
-            name="AddProduct" 
+        <>
+          {/* Pantallas del proveedor */}
+          <Stack.Screen name="ProviderTabs" component={ProviderTabs} />
+          <Stack.Screen
+            name="AddProduct"
             component={AddProductScreen}
-            
+            options={{
+              headerShown: true,
+              title: "Agregar Producto",
+              headerBackTitle: "Atrás",
+            }}
           />
-        </Stack.Group>
+        </>
       )}
     </Stack.Navigator>
   );

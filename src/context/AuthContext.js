@@ -1,6 +1,8 @@
 // src/context/AuthContext.js
 import React, { createContext, useState, useContext, useEffect } from "react";
+import { Alert } from "react-native";
 import { supabase } from "../utils/supabase";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const AuthContext = createContext();
 
@@ -37,14 +39,16 @@ export const AuthProvider = ({ children }) => {
 
       if (!profile) {
         console.log("Usuario no encontrado, creando nuevo perfil...");
-        
+
         const { data: authUser } = await supabase.auth.getUser();
-        
+
         if (authUser?.user) {
           const newUserData = {
             auth_id: authUser.user.id,
             email: authUser.user.email,
-            name: authUser.user.user_metadata?.name || authUser.user.email?.split("@")[0],
+            name:
+              authUser.user.user_metadata?.name ||
+              authUser.user.email?.split("@")[0],
             role: authUser.user.user_metadata?.role || "client",
           };
 
@@ -64,6 +68,9 @@ export const AuthProvider = ({ children }) => {
           if (newProfile) {
             console.log("Usuario creado exitosamente:", newProfile.id);
             setUser(newProfile);
+
+            await AsyncStorage.setItem("user", JSON.stringify(newProfile));
+
             return newProfile;
           }
         }
@@ -82,6 +89,9 @@ export const AuthProvider = ({ children }) => {
 
         console.log("Usuario encontrado:", profile.id);
         setUser(profile);
+
+        await AsyncStorage.setItem("user", JSON.stringify(profile));
+
         return profile;
       }
 
@@ -198,14 +208,18 @@ export const AuthProvider = ({ children }) => {
 
       if (userError) {
         console.error("Error creando usuario en tabla:", userError);
-        
+
         setTimeout(() => fetchUserProfile(authData.user.id), 1000);
-        
-        throw new Error("Error completando registro. Por favor intenta iniciar sesión.");
+
+        throw new Error(
+          "Error completando registro. Por favor intenta iniciar sesión.",
+        );
       }
 
       console.log("Usuario creado en tabla:", userData.id);
       setUser(userData);
+
+      await AsyncStorage.setItem("user", JSON.stringify(userData));
 
       return {
         success: true,
@@ -247,17 +261,20 @@ export const AuthProvider = ({ children }) => {
       }
 
       console.log("Login exitoso, buscando perfil...");
-      
+
       const profile = await fetchUserProfile(data.user.id);
-      
+
       if (!profile) {
         console.warn("No se pudo obtener/crear perfil, usando datos básicos");
-        setUser({
+        const basicUser = {
           id: data.user.id,
           email: data.user.email,
           name: data.user.user_metadata?.name || data.user.email?.split("@")[0],
           role: data.user.user_metadata?.role || "client",
-        });
+        };
+
+        setUser(basicUser);
+        await AsyncStorage.setItem("user", JSON.stringify(basicUser));
       }
 
       return {
@@ -275,56 +292,144 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = async () => {
+  const updateProfile = async (updates) => {
     try {
+      console.log("Actualizando perfil con datos:", updates);
       setLoading(true);
 
-      const { error } = await supabase.auth.signOut();
+      if (!user) {
+        throw new Error("No hay usuario autenticado");
+      }
+
+      if (!updates || Object.keys(updates).length === 0) {
+        throw new Error("No hay datos para actualizar");
+      }
+
+      const { data, error } = await supabase
+        .from("users")
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", user.id)
+        .select()
+        .single();
 
       if (error) {
-        console.error("Error cerrando sesión en Supabase:", error);
+        console.error("Error actualizando perfil en Supabase:", error);
         throw error;
       }
 
-      setUser(null);
-      setSession(null);
-      setCart([]);
+      if (!data) {
+        throw new Error("No se recibió respuesta del servidor");
+      }
 
-      console.log("Sesión cerrada exitosamente");
-      return { success: true };
+      console.log("Perfil actualizado exitosamente:", data);
+
+      const updatedUser = { ...user, ...data };
+      setUser(updatedUser);
+
+      await AsyncStorage.setItem("user", JSON.stringify(updatedUser));
+
+      return {
+        success: true,
+        user: updatedUser,
+        message: "Perfil actualizado correctamente",
+      };
     } catch (error) {
-      console.error("Error en logout:", error);
+      console.error("Error en updateProfile:", error);
       return {
         success: false,
-        error: error.message || "Error al cerrar sesión",
+        error: error.message || "Error al actualizar el perfil",
       };
     } finally {
       setLoading(false);
     }
   };
 
-  const updateProfile = async (updates) => {
+  const logout = async () => {
     try {
-      if (!user) {
-        throw new Error("No hay usuario autenticado");
+      setLoading(true);
+      console.log("🔄 Iniciando proceso de logout...");
+
+      try {
+        const { data: sessionCheck, error: sessionError } =
+          await supabase.auth.getSession();
+
+        if (sessionError) {
+          console.warn("⚠️ Error verificando sesión:", sessionError.message);
+        } else if (!sessionCheck.session) {
+          console.log(
+            "ℹ️ No hay sesión activa en Supabase, limpiando datos locales...",
+          );
+        } else {
+          console.log("✅ Sesión activa encontrada, procediendo a cerrarla...");
+
+          const { error: signOutError } = await supabase.auth.signOut();
+
+          if (signOutError) {
+            console.warn(
+              "⚠️ Advertencia al cerrar sesión en Supabase:",
+              signOutError.message,
+            );
+            console.log("ℹ️ Continuando con limpieza local...");
+          } else {
+            console.log("✅ Sesión cerrada exitosamente en Supabase");
+          }
+        }
+      } catch (authError) {
+        console.warn(
+          "⚠️ Error en verificación de sesión (continuando):",
+          authError.message,
+        );
       }
 
-      const { data, error } = await supabase
-        .from("users")
-        .update(updates)
-        .eq("id", user.id)
-        .select()
-        .single();
+      console.log("🧹 Limpiando estado local...");
+      setUser(null);
+      setSession(null);
+      setCart([]);
 
-      if (error) {
-        throw error;
+      try {
+        await AsyncStorage.removeItem("user");
+        console.log("✅ AsyncStorage limpiado correctamente");
+      } catch (storageError) {
+        console.warn("⚠️ Error limpiando AsyncStorage:", storageError.message);
       }
 
-      setUser(data);
-      return { success: true, user: data };
+      try {
+        await supabase.auth.setSession(null);
+        console.log("✅ Cliente de Supabase reseteado");
+      } catch (resetError) {
+        console.warn("⚠️ Error en reset de Supabase:", resetError.message);
+      }
+
+      console.log("🎉 Logout completado exitosamente");
+      return {
+        success: true,
+        message: "Sesión cerrada correctamente",
+      };
     } catch (error) {
-      console.error("Error en updateProfile:", error);
-      return { success: false, error: error.message };
+      console.error("❌ Error crítico en logout:", error);
+
+      console.log("🧹 Limpiando datos locales después de error...");
+      setUser(null);
+      setSession(null);
+      setCart([]);
+
+      try {
+        await AsyncStorage.removeItem("user");
+      } catch (storageError) {
+        console.warn("⚠️ Error secundario limpiando storage:", storageError);
+      }
+
+      return {
+        success: false,
+        error: error.message || "Error técnico al cerrar sesión",
+        message:
+          "Los datos locales han sido limpiados, pero hubo un error técnico",
+      };
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -334,7 +439,7 @@ export const AuthProvider = ({ children }) => {
       if (!authUser?.user) return { success: false, error: "No autenticado" };
 
       console.log("Migrando usuario:", authUser.user.id);
-      
+
       const { data: existing } = await supabase
         .from("users")
         .select("*")
@@ -348,7 +453,9 @@ export const AuthProvider = ({ children }) => {
       const newUserData = {
         auth_id: authUser.user.id,
         email: authUser.user.email,
-        name: authUser.user.user_metadata?.name || authUser.user.email?.split("@")[0],
+        name:
+          authUser.user.user_metadata?.name ||
+          authUser.user.email?.split("@")[0],
         role: authUser.user.user_metadata?.role || "client",
       };
 
@@ -361,6 +468,8 @@ export const AuthProvider = ({ children }) => {
       if (error) throw error;
 
       setUser(newUser);
+      await AsyncStorage.setItem("user", JSON.stringify(newUser));
+
       return { success: true, user: newUser };
     } catch (error) {
       console.error("Error migrando usuario:", error);
@@ -368,18 +477,70 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // NUEVA FUNCIÓN MODIFICADA: addToCart
   const addToCart = (product, quantity = 1) => {
-    setCart((prev) => {
-      const exists = prev.find((item) => item.id === product.id);
-      if (exists) {
-        return prev.map((item) =>
-          item.id === product.id
-            ? { ...item, quantity: item.quantity + quantity }
-            : item
+    try {
+      console.log("🛍️ Agregando producto al carrito:", {
+        id: product.id,
+        name: product.name,
+        provider_id: product.provider_id,
+        providerId: product.providerId,
+      });
+
+      // Validar que el producto tenga provider_id
+      const providerId = product.provider_id || product.providerId;
+
+      if (!providerId) {
+        console.error("❌ Producto sin provider_id:", product);
+        Alert.alert(
+          "Error",
+          "No se pudo identificar el proveedor del producto. Intenta nuevamente.",
         );
+        return;
       }
-      return [...prev, { ...product, quantity }];
-    });
+
+      setCart((prev) => {
+        const exists = prev.find((item) => item.id === product.id);
+        if (exists) {
+          return prev.map((item) =>
+            item.id === product.id
+              ? {
+                  ...item,
+                  quantity: item.quantity + quantity,
+                  provider_id: providerId,
+                }
+              : item,
+          );
+        }
+
+        // Crear el nuevo item del carrito CON provider_id
+        const cartItem = {
+          id: product.id,
+          name: product.name,
+          description: product.description,
+          price: parseFloat(product.price) || 0,
+          discount_price:
+            product.discount_price || product.discountPrice || null,
+          category_id: product.category_id,
+          images: product.images || (product.image ? [product.image] : []),
+          stock: product.stock || 0,
+          quantity: quantity,
+          provider_id: providerId, // <-- AQUÍ SE GUARDA EL PROVIDER_ID
+          provider_name:
+            product.provider_name || product.provider?.name || "Proveedor",
+          created_at: product.created_at,
+          updated_at: product.updated_at,
+        };
+
+        console.log(
+          "✅ Producto agregado al carrito con provider_id:",
+          cartItem.provider_id,
+        );
+        return [...prev, cartItem];
+      });
+    } catch (error) {
+      console.error("Error agregando al carrito:", error);
+    }
   };
 
   const removeFromCart = (productId) =>
@@ -393,7 +554,7 @@ export const AuthProvider = ({ children }) => {
           return { ...item, quantity: newQty > 0 ? newQty : 1 };
         }
         return item;
-      })
+      }),
     );
   };
 
@@ -403,7 +564,7 @@ export const AuthProvider = ({ children }) => {
 
   const cartTotal = cart.reduce(
     (total, item) => total + item.price * item.quantity,
-    0
+    0,
   );
 
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0);

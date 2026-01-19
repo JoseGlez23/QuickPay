@@ -15,25 +15,28 @@ import {
   Alert,
   Easing,
   ActivityIndicator,
-  Switch, // Añadimos Switch
+  Switch,
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
 import { useProducts } from "../context/ProductContext";
-import { useTheme } from "../context/ThemeContext"; // IMPORTAR TEMA
+import { useTheme } from "../context/ThemeContext";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
+import { supabase } from "../utils/supabase"; // Importa supabase
 
 const { width } = Dimensions.get("window");
 
 export default function ProviderDashboard({ navigation }) {
   const { user, logout } = useAuth();
   const { myProducts, loading, refreshProducts } = useProducts();
-  const { colors, isDarkMode, toggleTheme } = useTheme(); // CONSUMIR TEMA
+  const { colors, isDarkMode, toggleTheme } = useTheme();
 
   const [refreshing, setRefreshing] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
-  const [activeStat, setActiveStat] = useState("today");
+  const [dashboardStats, setDashboardStats] = useState({
+    totalSales: 0,
+    loading: true
+  });
 
-  // Animaciones existentes
   const bgAnim1 = useRef(new Animated.Value(0)).current;
   const bgAnim2 = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(-300)).current;
@@ -60,7 +63,12 @@ export default function ProviderDashboard({ navigation }) {
     };
     float(bgAnim1, 5000);
     float(bgAnim2, 8000);
-  }, []);
+    
+    // Cargar estadísticas del dashboard cuando se monta el componente
+    if (user?.id) {
+      loadDashboardStats();
+    }
+  }, [user?.id]);
 
   const toggleMenu = (show) => {
     if (show) {
@@ -89,9 +97,59 @@ export default function ProviderDashboard({ navigation }) {
     }
   };
 
+  // Función para cargar estadísticas reales del dashboard
+  const loadDashboardStats = async () => {
+    try {
+      setDashboardStats(prev => ({ ...prev, loading: true }));
+      
+      if (!user?.id) {
+        setDashboardStats({
+          totalSales: 0,
+          loading: false
+        });
+        return;
+      }
+
+      // Obtener pedidos completados y calcular ingresos totales
+      const { data: ordersData, error: ordersError } = await supabase
+        .from('orders')
+        .select('total')
+        .eq('provider_id', user.id)
+        .eq('status', 'completed'); // Ajusta 'completed' según tu BD
+
+      if (ordersError) {
+        console.error('Error obteniendo pedidos:', ordersError);
+      }
+
+      // Calcular ingresos totales sumando todos los totales de pedidos completados
+      let totalSales = 0;
+      
+      if (ordersData && ordersData.length > 0) {
+        totalSales = ordersData.reduce((sum, order) => {
+          return sum + (parseFloat(order.total) || 0);
+        }, 0);
+      }
+
+      setDashboardStats({
+        totalSales,
+        loading: false
+      });
+
+    } catch (error) {
+      console.error('Error cargando estadísticas del dashboard:', error);
+      setDashboardStats({
+        totalSales: 0,
+        loading: false
+      });
+    }
+  };
+
   const handleRefresh = async () => {
     setRefreshing(true);
-    await refreshProducts();
+    await Promise.all([
+      refreshProducts(),
+      loadDashboardStats() // Refrescar estadísticas también
+    ]);
     setRefreshing(false);
   };
 
@@ -110,13 +168,18 @@ export default function ProviderDashboard({ navigation }) {
   };
 
   const totalProducts = myProducts.length;
-  const totalSales = myProducts.reduce(
-    (sum, product) => sum + product.price * 10,
-    0,
-  );
   const lowStockProducts = myProducts.filter(
     (p) => p.stock > 0 && p.stock <= 5,
   ).length;
+
+  // Formatear moneda
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('es-MX', {
+      style: 'currency',
+      currency: 'MXN',
+      minimumFractionDigits: 2
+    }).format(amount);
+  };
 
   return (
     <View style={[styles.mainWrapper, { backgroundColor: colors.background }]}>
@@ -126,7 +189,7 @@ export default function ProviderDashboard({ navigation }) {
         translucent
       />
 
-      {/* Círculos de fondo adaptables */}
+      {/* Círculos de fondo */}
       <Animated.View
         style={[
           styles.bgCircle,
@@ -142,25 +205,6 @@ export default function ProviderDashboard({ navigation }) {
             top: 50,
             left: -40,
             backgroundColor: colors.primary,
-            opacity: isDarkMode ? 0.08 : 0.12,
-          },
-        ]}
-      />
-      <Animated.View
-        style={[
-          styles.bgCircle,
-          {
-            transform: [
-              {
-                translateX: bgAnim2.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0, 60],
-                }),
-              },
-            ],
-            bottom: 150,
-            right: -60,
-            backgroundColor: "#10b981",
             opacity: isDarkMode ? 0.08 : 0.12,
           },
         ]}
@@ -220,73 +264,49 @@ export default function ProviderDashboard({ navigation }) {
           />
         }
       >
-        {/* Cuadro de Rendimiento */}
+        {/* Cuadro de Rendimiento Simplificado - CON DATOS REALES */}
         <View
           style={[
             styles.statsCard,
             { backgroundColor: colors.card, borderLeftColor: colors.primary },
           ]}
         >
-          <View style={styles.statsTop}>
+          <View style={styles.statsHeaderRow}>
             <Text style={[styles.statsTitle, { color: colors.textSecondary }]}>
-              Resumen del negocio
+              Resumen de ingresos
             </Text>
-            <View
-              style={[
-                styles.pillSelector,
-                { backgroundColor: isDarkMode ? "#2d2d2d" : "#f1f5f9" },
-              ]}
-            >
-              {["today", "week", "month"].map((t) => (
-                <TouchableOpacity
-                  key={t}
-                  onPress={() => setActiveStat(t)}
-                  style={[
-                    styles.pill,
-                    activeStat === t && { backgroundColor: colors.primary },
-                  ]}
+            {dashboardStats.loading && (
+              <ActivityIndicator size="small" color={colors.primary} />
+            )}
+          </View>
+          
+          {dashboardStats.loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={colors.primary} />
+            </View>
+          ) : (
+            <View style={styles.statsValueRow}>
+              <View>
+                <Text style={[styles.bigAmount, { color: colors.text }]}>
+                  {formatCurrency(dashboardStats.totalSales)}
+                </Text>
+                <Text
+                  style={[styles.statsSubtitle, { color: colors.textSecondary }]}
                 >
-                  <Text
-                    style={[
-                      styles.pillText,
-                      {
-                        color: activeStat === t ? "#fff" : colors.textSecondary,
-                      },
-                    ]}
-                  >
-                    {t === "today" ? "Hoy" : t === "week" ? "Sem" : "Mes"}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                  Ingresos totales reales
+                </Text>
+              </View>
+              <Icon
+                name="cash-multiple"
+                size={40}
+                color={colors.primary}
+                opacity={0.2}
+              />
             </View>
-          </View>
-
-          <View style={styles.statsValueRow}>
-            <View>
-              <Text style={[styles.bigAmount, { color: colors.text }]}>
-                ${totalSales.toLocaleString()}
-              </Text>
-              <Text
-                style={[styles.statsSubtitle, { color: colors.textSecondary }]}
-              >
-                Ingresos estimados
-              </Text>
-            </View>
-            <View
-              style={[
-                styles.badge,
-                { backgroundColor: isDarkMode ? "#064e3b" : "#ecfdf5" },
-              ]}
-            >
-              <Icon name="trending-up" size={16} color="#10b981" />
-              <Text style={[styles.badgeText, { color: "#10b981" }]}>
-                +{totalProducts * 2}%
-              </Text>
-            </View>
-          </View>
+          )}
         </View>
 
-        {/* Mini estadísticas */}
+        {/* Mini estadísticas ajustadas */}
         <View style={styles.miniStats}>
           <StatCard
             icon="package-variant"
@@ -300,13 +320,6 @@ export default function ProviderDashboard({ navigation }) {
             value={lowStockProducts}
             label="Bajo stock"
             color="#F59E0B"
-            themeColors={colors}
-          />
-          <StatCard
-            icon="star"
-            value={totalProducts > 0 ? "4.8" : "0"}
-            label="Rating"
-            color="#8B5CF6"
             themeColors={colors}
           />
         </View>
@@ -354,6 +367,19 @@ export default function ProviderDashboard({ navigation }) {
               />
             ))}
           </View>
+        )}
+
+        {/* Botón para ver más productos */}
+        {myProducts.length > 4 && (
+          <TouchableOpacity
+            style={[styles.seeMoreBtn, { backgroundColor: colors.card }]}
+            onPress={() => navigation.navigate("ProviderProducts")}
+          >
+            <Text style={[styles.seeMoreText, { color: colors.primary }]}>
+              Ver todos los productos ({myProducts.length})
+            </Text>
+            <Icon name="chevron-right" size={20} color={colors.primary} />
+          </TouchableOpacity>
         )}
       </ScrollView>
 
@@ -411,8 +437,6 @@ export default function ProviderDashboard({ navigation }) {
                   }}
                   themeColors={colors}
                 />
-
-                {/* --- SECCIÓN MODO OSCURO --- */}
                 <View style={styles.themeSwitchRow}>
                   <View
                     style={{
@@ -434,13 +458,6 @@ export default function ProviderDashboard({ navigation }) {
                     value={isDarkMode}
                     onValueChange={toggleTheme}
                     trackColor={{ false: "#cbd5e1", true: colors.primary }}
-                    thumbColor={
-                      Platform.OS === "ios"
-                        ? "#fff"
-                        : isDarkMode
-                          ? "#fff"
-                          : "#f4f3f4"
-                    }
                   />
                 </View>
               </View>
@@ -463,10 +480,10 @@ export default function ProviderDashboard({ navigation }) {
   );
 }
 
-// Sub-componentes para limpiar el código principal
+// Sub-componentes
 const StatCard = ({ icon, value, label, color, themeColors }) => (
   <View style={[styles.miniStatCard, { backgroundColor: themeColors.card }]}>
-    <Icon name={icon} size={24} color={color} />
+    <Icon name={icon} size={28} color={color} />
     <Text style={[styles.miniStatValue, { color: themeColors.text }]}>
       {value}
     </Text>
@@ -546,7 +563,6 @@ const DrawerLink = ({ icon, label, onPress, themeColors }) => (
   </TouchableOpacity>
 );
 
-// Los estilos se mantienen mayormente iguales, solo quitamos los colores fijos que ahora son dinámicos
 const styles = StyleSheet.create({
   mainWrapper: { flex: 1 },
   bgCircle: {
@@ -580,7 +596,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   avatarTxt: { color: "#fff", fontSize: 18, fontWeight: "bold" },
-  scroll: { padding: 20 },
+  scroll: { padding: 20, paddingBottom: 40 },
   statsCard: {
     borderRadius: 25,
     padding: 20,
@@ -588,45 +604,41 @@ const styles = StyleSheet.create({
     borderLeftWidth: 5,
     marginBottom: 15,
   },
-  statsTop: {
+  statsHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    marginBottom: 10,
   },
   statsTitle: { fontSize: 14, fontWeight: "700" },
-  pillSelector: { flexDirection: "row", borderRadius: 10, padding: 3 },
-  pill: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
-  pillText: { fontSize: 10, fontWeight: "700" },
   statsValueRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 15,
+    marginTop: 10,
     justifyContent: "space-between",
   },
   bigAmount: { fontSize: 32, fontWeight: "900" },
   statsSubtitle: { fontSize: 12, marginTop: 4 },
-  badge: {
-    flexDirection: "row",
+  loadingContainer: {
+    height: 80,
+    justifyContent: "center",
     alignItems: "center",
-    padding: 8,
-    borderRadius: 8,
   },
-  badgeText: { fontSize: 12, fontWeight: "bold", marginLeft: 3 },
   miniStats: {
     flexDirection: "row",
     justifyContent: "space-between",
     marginBottom: 20,
+    gap: 10,
   },
   miniStatCard: {
     flex: 1,
     borderRadius: 15,
     padding: 15,
     alignItems: "center",
-    marginHorizontal: 5,
     elevation: 2,
   },
-  miniStatValue: { fontSize: 20, fontWeight: "900", marginTop: 8 },
-  miniStatLabel: { fontSize: 11, marginTop: 4 },
+  miniStatValue: { fontSize: 22, fontWeight: "900", marginTop: 8 },
+  miniStatLabel: { fontSize: 12, marginTop: 4 },
   row: { flexDirection: "row", gap: 15, marginVertical: 15 },
   actionBtn: {
     flex: 1,
@@ -688,6 +700,20 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
   itemStock: { fontSize: 12, marginTop: 2 },
+  seeMoreBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 15,
+    borderRadius: 15,
+    marginTop: 10,
+    elevation: 2,
+  },
+  seeMoreText: {
+    fontSize: 14,
+    fontWeight: "700",
+    marginRight: 5,
+  },
   overlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.6)",

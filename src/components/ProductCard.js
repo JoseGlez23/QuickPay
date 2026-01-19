@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+// src/components/ProductCard.js
+import React, { useState } from "react";
 import {
   View,
   Text,
@@ -6,16 +7,16 @@ import {
   TouchableOpacity,
   Image,
   Animated,
-} from 'react-native';
-import Icon from 'react-native-vector-icons/MaterialIcons';
-import { 
-  COLORS, 
-  FONT_SIZES, 
-  FONT_WEIGHTS, 
-  BORDER_RADIUS, 
-  SHADOWS, 
-  SPACING 
-} from '../constants/theme';
+} from "react-native";
+import Icon from "react-native-vector-icons/MaterialIcons";
+import {
+  COLORS,
+  FONT_SIZES,
+  FONT_WEIGHTS,
+  BORDER_RADIUS,
+  SHADOWS,
+  SPACING,
+} from "../constants/theme";
 
 const ProductCard = ({ product, onPress, onAddToCart, style }) => {
   const [isFavorite, setIsFavorite] = useState(product.isFavorite);
@@ -23,7 +24,6 @@ const ProductCard = ({ product, onPress, onAddToCart, style }) => {
 
   const handleFavorite = () => {
     setIsFavorite(!isFavorite);
-    // Animación de corazón
     Animated.sequence([
       Animated.timing(scaleAnim, {
         toValue: 1.3,
@@ -39,8 +39,15 @@ const ProductCard = ({ product, onPress, onAddToCart, style }) => {
   };
 
   const handleQuickAdd = () => {
-    onAddToCart();
-    // Animación de feedback
+    // Asegurar que el producto tenga provider_id antes de agregar al carrito
+    const productWithProvider = {
+      ...product,
+      provider_id: product.provider_id, // Asegurar que este campo exista
+      providerId: product.provider_id || product.providerId, // Compatibilidad
+    };
+
+    onAddToCart(productWithProvider);
+
     Animated.sequence([
       Animated.timing(scaleAnim, {
         toValue: 0.95,
@@ -56,8 +63,10 @@ const ProductCard = ({ product, onPress, onAddToCart, style }) => {
   };
 
   return (
-    <Animated.View style={[styles.container, { transform: [{ scale: scaleAnim }] }, style]}>
-      <TouchableOpacity 
+    <Animated.View
+      style={[styles.container, { transform: [{ scale: scaleAnim }] }, style]}
+    >
+      <TouchableOpacity
         style={styles.card}
         onPress={onPress}
         activeOpacity={0.9}
@@ -72,36 +81,40 @@ const ProductCard = ({ product, onPress, onAddToCart, style }) => {
           {product.discountPrice && (
             <View style={[styles.badge, styles.discountBadge]}>
               <Text style={styles.badgeText}>
-                {Math.round(((product.price - product.discountPrice) / product.price) * 100)}%
+                {Math.round(
+                  ((product.price - product.discountPrice) / product.price) *
+                    100,
+                )}
+                %
               </Text>
             </View>
           )}
           {product.stock < 10 && product.stock > 0 && (
             <View style={[styles.badge, styles.stockBadge]}>
               <Text style={styles.badgeText}>
-                {product.stock} {product.stock === 1 ? 'último' : 'últimos'}
+                {product.stock} {product.stock === 1 ? "último" : "últimos"}
               </Text>
             </View>
           )}
         </View>
 
         {/* Favorite Button */}
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.favoriteButton}
           onPress={handleFavorite}
           activeOpacity={0.7}
         >
-          <Icon 
-            name={isFavorite ? 'favorite' : 'favorite-border'} 
-            size={20} 
+          <Icon
+            name={isFavorite ? "favorite" : "favorite-border"}
+            size={20}
             color={isFavorite ? COLORS.destructive : COLORS.mutedForeground}
           />
         </TouchableOpacity>
 
         {/* Product Image */}
         <View style={styles.imageContainer}>
-          <Image 
-            source={{ uri: product.image }} 
+          <Image
+            source={{ uri: product.image }}
             style={styles.productImage}
             resizeMode="cover"
           />
@@ -117,7 +130,7 @@ const ProductCard = ({ product, onPress, onAddToCart, style }) => {
           <Text style={styles.productName} numberOfLines={2}>
             {product.name}
           </Text>
-          
+
           <View style={styles.ratingContainer}>
             <Icon name="star" size={FONT_SIZES.sm} color="#FFB800" />
             <Text style={styles.rating}>{product.rating}</Text>
@@ -140,25 +153,31 @@ const ProductCard = ({ product, onPress, onAddToCart, style }) => {
           </View>
 
           {/* Quick Add Button */}
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[
               styles.quickAddButton,
-              product.stock === 0 && styles.disabledButton
+              product.stock === 0 && styles.disabledButton,
             ]}
             onPress={handleQuickAdd}
             disabled={product.stock === 0}
             activeOpacity={0.7}
           >
-            <Icon 
-              name="add-shopping-cart" 
-              size={16} 
-              color={product.stock === 0 ? COLORS.mutedForeground : COLORS.primaryForeground} 
+            <Icon
+              name="add-shopping-cart"
+              size={16}
+              color={
+                product.stock === 0
+                  ? COLORS.mutedForeground
+                  : COLORS.primaryForeground
+              }
             />
-            <Text style={[
-              styles.quickAddText,
-              product.stock === 0 && styles.disabledText
-            ]}>
-              {product.stock === 0 ? 'Agotado' : 'Agregar'}
+            <Text
+              style={[
+                styles.quickAddText,
+                product.stock === 0 && styles.disabledText,
+              ]}
+            >
+              {product.stock === 0 ? "Agotado" : "Agregar"}
             </Text>
           </TouchableOpacity>
         </View>
@@ -170,21 +189,21 @@ const ProductCard = ({ product, onPress, onAddToCart, style }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    maxWidth: '50%',
+    maxWidth: "50%",
   },
   card: {
     backgroundColor: COLORS.card,
     borderRadius: BORDER_RADIUS.lg,
-    overflow: 'hidden',
+    overflow: "hidden",
     ...SHADOWS.md,
     marginBottom: SPACING.sm,
   },
   badgesContainer: {
-    position: 'absolute',
+    position: "absolute",
     top: SPACING.sm,
     left: SPACING.sm,
     zIndex: 2,
-    flexDirection: 'column',
+    flexDirection: "column",
     gap: SPACING.xs,
   },
   badge: {
@@ -207,38 +226,38 @@ const styles = StyleSheet.create({
     fontWeight: FONT_WEIGHTS.bold,
   },
   favoriteButton: {
-    position: 'absolute',
+    position: "absolute",
     top: SPACING.sm,
     right: SPACING.sm,
     zIndex: 2,
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "rgba(255, 255, 255, 0.9)",
+    alignItems: "center",
+    justifyContent: "center",
     ...SHADOWS.sm,
   },
   imageContainer: {
     aspectRatio: 1,
     backgroundColor: COLORS.muted,
-    position: 'relative',
+    position: "relative",
   },
   productImage: {
-    width: '100%',
-    height: '100%',
+    width: "100%",
+    height: "100%",
   },
   outOfStockOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   outOfStockText: {
     color: COLORS.primaryForeground,
     fontSize: FONT_SIZES.sm,
     fontWeight: FONT_WEIGHTS.bold,
-    transform: [{ rotate: '-45deg' }],
+    transform: [{ rotate: "-45deg" }],
   },
   productInfo: {
     padding: SPACING.sm,
@@ -251,8 +270,8 @@ const styles = StyleSheet.create({
     height: 40,
   },
   ratingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     marginBottom: SPACING.sm,
   },
   rating: {
@@ -266,8 +285,8 @@ const styles = StyleSheet.create({
     color: COLORS.mutedForeground,
   },
   priceContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     marginBottom: SPACING.sm,
   },
   price: {
@@ -284,12 +303,12 @@ const styles = StyleSheet.create({
   originalPrice: {
     fontSize: FONT_SIZES.sm,
     color: COLORS.mutedForeground,
-    textDecorationLine: 'line-through',
+    textDecorationLine: "line-through",
   },
   quickAddButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: COLORS.primary,
     borderRadius: BORDER_RADIUS.md,
     paddingVertical: SPACING.xs,

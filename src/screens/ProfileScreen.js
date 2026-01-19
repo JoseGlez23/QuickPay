@@ -1,28 +1,36 @@
 // src/screens/ProfileScreen.js
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  SafeAreaView, StatusBar, TextInput, Modal, Platform
+  SafeAreaView, StatusBar, TextInput, Modal, Platform, ActivityIndicator, Alert
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
 export default function ProfileScreen({ navigation }) {
-  const { user, logout } = useAuth();
+  const { user, logout, updateProfile } = useAuth();
   const { colors, isDarkMode } = useTheme();
   
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState(user?.name || 'Cliente');
-  const [tempName, setTempName] = useState(name); // Para revertir si cancela
+  const [tempName, setTempName] = useState(name);
+  const [updating, setUpdating] = useState(false);
   
-  // Simulación de fecha de última edición (en una app real vendría de la DB)
+  // Simulación de fecha de última edición
   const [lastEditDate, setLastEditDate] = useState(null); 
 
   const [modalVisible, setModalVisible] = useState(false);
   const [modalConfig, setModalConfig] = useState({ 
     title: '', message: '', icon: 'info', confirmText: 'Aceptar', onConfirm: () => {} 
   });
+
+  // Actualizar el nombre cuando cambie el usuario
+  useEffect(() => {
+    if (user?.name && user.name !== name) {
+      setName(user.name);
+    }
+  }, [user]);
 
   const getInitial = () => {
     if (name) return name.charAt(0).toUpperCase();
@@ -69,19 +77,48 @@ export default function ProfileScreen({ navigation }) {
       // Confirmar cambio
       showCustomAlert(
         "¿Confirmar cambio?",
-        "Si cambias tu nombre ahora, no podrás volver a modificarlo durante los próximos 14 días.",
+        "¿Estás seguro que deseas actualizar tu nombre de usuario?",
         "help",
-        () => {
-          setName(tempName);
-          setLastEditDate(new Date());
-          setIsEditing(false);
-        },
-        "Cambiar nombre"
+        () => updateUserName(),
+        "Actualizar"
       );
     } else {
       // Iniciar edición
       setTempName(name);
       setIsEditing(true);
+    }
+  };
+
+  const updateUserName = async () => {
+    if (!tempName.trim()) {
+      Alert.alert("Error", "El nombre no puede estar vacío");
+      return;
+    }
+
+    setUpdating(true);
+    try {
+      const result = await updateProfile({ name: tempName.trim() });
+      
+      if (result.success) {
+        setName(tempName.trim());
+        setLastEditDate(new Date());
+        setIsEditing(false);
+        
+        Alert.alert(
+          "✅ Éxito",
+          "Nombre actualizado correctamente",
+          [{ text: "OK" }]
+        );
+      } else {
+        Alert.alert("❌ Error", result.error || "Error al actualizar el nombre");
+        setTempName(name); // Revertir cambios
+      }
+    } catch (error) {
+      console.error("Error actualizando nombre:", error);
+      Alert.alert("❌ Error", "Ocurrió un error al actualizar el nombre");
+      setTempName(name); // Revertir cambios
+    } finally {
+      setUpdating(false);
     }
   };
 
@@ -117,17 +154,32 @@ export default function ProfileScreen({ navigation }) {
                 style={[styles.modalCancelButton, { backgroundColor: isDarkMode ? '#333' : '#F3F4F6' }]} 
                 onPress={() => {
                   setModalVisible(false);
-                  if(isEditing) setTempName(name); // Revertir si cancela el guardado
+                  if(isEditing) {
+                    setTempName(name); // Revertir si cancela el guardado
+                    setIsEditing(false);
+                  }
                 }}
+                disabled={updating}
               >
                 <Text style={[styles.modalCancelText, { color: colors.textSecondary }]}>Cancelar</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
-                style={[styles.modalConfirmButton, { backgroundColor: modalConfig.icon === 'logout' ? '#DC2626' : colors.primary }]}
+                style={[
+                  styles.modalConfirmButton, 
+                  { 
+                    backgroundColor: modalConfig.icon === 'logout' ? '#DC2626' : colors.primary,
+                    opacity: updating ? 0.7 : 1
+                  }
+                ]}
                 onPress={modalConfig.onConfirm}
+                disabled={updating}
               >
-                <Text style={styles.modalConfirmText}>{modalConfig.confirmText}</Text>
+                {updating ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.modalConfirmText}>{modalConfig.confirmText}</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -139,8 +191,16 @@ export default function ProfileScreen({ navigation }) {
           <Icon name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Mi Perfil</Text>
-        <TouchableOpacity onPress={handleEditPress} style={styles.editButton}>
-          <Text style={styles.editText}>{isEditing ? 'Guardar' : 'Editar'}</Text>
+        <TouchableOpacity 
+          onPress={handleEditPress} 
+          style={styles.editButton}
+          disabled={updating}
+        >
+          {updating ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Text style={styles.editText}>{isEditing ? 'Guardar' : 'Editar'}</Text>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -163,6 +223,10 @@ export default function ProfileScreen({ navigation }) {
                 value={tempName}
                 onChangeText={setTempName}
                 autoFocus
+                placeholder="Ingresa tu nombre"
+                placeholderTextColor={colors.textSecondary}
+                maxLength={50}
+                editable={!updating}
               />
             ) : (
               <Text style={[styles.userName, { color: colors.text }]}>{name}</Text>
@@ -176,6 +240,32 @@ export default function ProfileScreen({ navigation }) {
             <View style={[styles.statusBadge, { backgroundColor: isDarkMode ? '#1e3a8a' : '#EFF6FF' }]}>
               <Text style={[styles.statusText, { color: colors.primary }]}>CUENTA DE CLIENTE</Text>
             </View>
+            
+            {lastEditDate && !isEditing && (
+              <Text style={[styles.lastEditText, { color: colors.textSecondary }]}>
+                Última actualización: {lastEditDate.toLocaleDateString()}
+              </Text>
+            )}
+          </View>
+        </View>
+
+        <View style={[styles.section, { backgroundColor: colors.card }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Información de la cuenta</Text>
+          
+          <View style={styles.infoRow}>
+            <Icon name="person" size={18} color={colors.textSecondary} />
+            <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Rol:</Text>
+            <Text style={[styles.infoValue, { color: colors.text }]}>
+              {user?.role === 'client' ? 'Cliente' : user?.role || 'Cliente'}
+            </Text>
+          </View>
+          
+          <View style={styles.infoRow}>
+            <Icon name="calendar-today" size={18} color={colors.textSecondary} />
+            <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Miembro desde:</Text>
+            <Text style={[styles.infoValue, { color: colors.text }]}>
+              {user?.created_at ? new Date(user.created_at).toLocaleDateString() : 'Fecha no disponible'}
+            </Text>
           </View>
         </View>
 
@@ -193,6 +283,7 @@ export default function ProfileScreen({ navigation }) {
           <TouchableOpacity 
             style={[styles.logoutButton, { backgroundColor: colors.card, borderColor: isDarkMode ? '#451a1a' : '#FCA5A5' }]} 
             onPress={handleLogout}
+            disabled={updating}
           >
             <Icon name="logout" size={20} color="#DC2626" />
             <Text style={styles.logoutText}>Cerrar sesión de la cuenta</Text>
@@ -223,25 +314,45 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
   backButton: { padding: 4 },
-  editButton: { paddingVertical: 4, paddingHorizontal: 10 },
+  editButton: { paddingVertical: 4, paddingHorizontal: 10, minWidth: 60, alignItems: 'center' },
   editText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
   userCard: { padding: 24, margin: 16, borderRadius: 20, alignItems: 'center', elevation: 3 },
   avatarWrapper: { marginBottom: 16 },
   userAvatar: { width: 100, height: 100, borderRadius: 50, alignItems: 'center', justifyContent: 'center', borderWidth: 3, elevation: 5 },
   avatarInitial: { fontSize: 42, fontWeight: 'bold', color: '#fff' },
   userInfo: { alignItems: 'center', width: '100%' },
-  userName: { fontSize: 20, fontWeight: 'bold' },
+  userName: { fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginBottom: 4 },
   emailBadge: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
   userEmail: { fontSize: 14, marginLeft: 6 },
-  inputActive: { width: '85%', borderRadius: 8, padding: 8, textAlign: 'center', fontSize: 18, borderBottomWidth: 2 },
-  statusBadge: { marginTop: 16, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  inputActive: { 
+    width: '90%', 
+    borderRadius: 8, 
+    padding: 12, 
+    textAlign: 'center', 
+    fontSize: 18, 
+    borderBottomWidth: 2,
+    marginBottom: 8 
+  },
+  statusBadge: { marginTop: 12, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
   statusText: { fontSize: 10, fontWeight: '800' },
+  lastEditText: { fontSize: 11, marginTop: 8, fontStyle: 'italic' },
   section: { marginHorizontal: 16, marginBottom: 12, padding: 18, borderRadius: 16 },
   sectionTitle: { fontSize: 15, fontWeight: 'bold', marginBottom: 16 },
+  infoRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  infoLabel: { fontSize: 14, marginLeft: 8, width: 100 },
+  infoValue: { fontSize: 14, fontWeight: '500', flex: 1 },
   locationRow: { flexDirection: 'row', alignItems: 'center' },
   locationText: { marginLeft: 10, fontSize: 14 },
   logoutWrapper: { marginTop: 24, paddingHorizontal: 16, alignItems: 'center' },
-  logoutButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%', padding: 16, borderRadius: 12, borderWidth: 1 },
+  logoutButton: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    width: '100%', 
+    padding: 16, 
+    borderRadius: 12, 
+    borderWidth: 1 
+  },
   logoutText: { marginLeft: 8, color: '#DC2626', fontWeight: 'bold', fontSize: 15 },
   footerNote: { marginTop: 12, fontSize: 11 },
 });
