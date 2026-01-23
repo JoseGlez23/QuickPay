@@ -21,20 +21,28 @@ import { useAuth } from "../context/AuthContext";
 import { useProducts } from "../context/ProductContext";
 import { useTheme } from "../context/ThemeContext";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
-import { supabase } from "../utils/supabase"; // Importa supabase
+import { supabase } from "../utils/supabase";
 
 const { width } = Dimensions.get("window");
 
 export default function ProviderDashboard({ navigation }) {
   const { user, logout } = useAuth();
-  const { myProducts, loading, refreshProducts } = useProducts();
+  const {
+    myProducts,
+    providerLoading: loading,
+    refreshProducts,
+  } = useProducts();
   const { colors, isDarkMode, toggleTheme } = useTheme();
 
   const [refreshing, setRefreshing] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [dashboardStats, setDashboardStats] = useState({
     totalSales: 0,
-    loading: true
+    totalOrders: 0,
+    pendingOrders: 0,
+    todaySales: 0,
+    monthlySales: 0,
+    loading: true,
   });
 
   const bgAnim1 = useRef(new Animated.Value(0)).current;
@@ -63,11 +71,34 @@ export default function ProviderDashboard({ navigation }) {
     };
     float(bgAnim1, 5000);
     float(bgAnim2, 8000);
-    
-    // Cargar estadísticas del dashboard cuando se monta el componente
+
     if (user?.id) {
       loadDashboardStats();
     }
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const channel = supabase
+      .channel(`provider-orders-${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "orders",
+          filter: `provider_id=eq.${user.id}`,
+        },
+        () => {
+          loadDashboardStats();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user?.id]);
 
   const toggleMenu = (show) => {
@@ -97,59 +128,117 @@ export default function ProviderDashboard({ navigation }) {
     }
   };
 
-  // Función para cargar estadísticas reales del dashboard
   const loadDashboardStats = async () => {
     try {
-      setDashboardStats(prev => ({ ...prev, loading: true }));
-      
+      setDashboardStats((prev) => ({ ...prev, loading: true }));
+
       if (!user?.id) {
         setDashboardStats({
           totalSales: 0,
-          loading: false
+          totalOrders: 0,
+          pendingOrders: 0,
+          todaySales: 0,
+          monthlySales: 0,
+          loading: false,
         });
         return;
       }
 
-      // Obtener pedidos completados y calcular ingresos totales
-      const { data: ordersData, error: ordersError } = await supabase
-        .from('orders')
-        .select('total')
-        .eq('provider_id', user.id)
-        .eq('status', 'completed'); // Ajusta 'completed' según tu BD
+      const { data: salesData, error: salesError } = await supabase
+        .from("order_items")
+        .select(
+          `
+          subtotal,
+          quantity,
+          unit_price,
+          order:orders!inner(
+            id,
+            status,
+            created_at
+          )
+        `,
+        )
+        .eq("order.provider_id", user.id)
+        .eq("order.status", "paid")
+        .order("created_at", {
+          ascending: false,
+          foreignTable: "order",
+        });
 
-      if (ordersError) {
-        console.error('Error obteniendo pedidos:', ordersError);
+      if (salesError) {
+        console.error("Error cargando ventas:", salesError);
       }
 
-      // Calcular ingresos totales sumando todos los totales de pedidos completados
+      const { data: pendingOrdersData, error: pendingError } = await supabase
+        .from("orders")
+        .select("id, status")
+        .eq("provider_id", user.id)
+        .in("status", ["pending", "paid"])
+        .limit(100);
+
       let totalSales = 0;
-      
-      if (ordersData && ordersData.length > 0) {
-        totalSales = ordersData.reduce((sum, order) => {
-          return sum + (parseFloat(order.total) || 0);
-        }, 0);
+      let todaySales = 0;
+      let monthlySales = 0;
+      const uniqueOrderIds = new Set();
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const firstDayOfMonth = new Date(
+        today.getFullYear(),
+        today.getMonth(),
+        1,
+      );
+      const lastDayOfMonth = new Date(
+        today.getFullYear(),
+        today.getMonth() + 1,
+        0,
+      );
+
+      if (salesData && salesData.length > 0) {
+        salesData.forEach((item) => {
+          const subtotal = item.subtotal || item.quantity * item.unit_price;
+          totalSales += subtotal;
+          uniqueOrderIds.add(item.order.id);
+
+          const orderDate = new Date(item.order.created_at);
+
+          if (orderDate >= today) {
+            todaySales += subtotal;
+          }
+
+          if (orderDate >= firstDayOfMonth && orderDate <= lastDayOfMonth) {
+            monthlySales += subtotal;
+          }
+        });
       }
+
+      const totalOrders = uniqueOrderIds.size;
+      const pendingOrders = pendingOrdersData?.length || 0;
 
       setDashboardStats({
         totalSales,
-        loading: false
+        totalOrders,
+        pendingOrders,
+        todaySales,
+        monthlySales,
+        loading: false,
       });
-
     } catch (error) {
-      console.error('Error cargando estadísticas del dashboard:', error);
+      console.error("Error cargando estadísticas:", error);
       setDashboardStats({
         totalSales: 0,
-        loading: false
+        totalOrders: 0,
+        pendingOrders: 0,
+        todaySales: 0,
+        monthlySales: 0,
+        loading: false,
       });
     }
   };
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([
-      refreshProducts(),
-      loadDashboardStats() // Refrescar estadísticas también
-    ]);
+    await Promise.all([refreshProducts(), loadDashboardStats()]);
     setRefreshing(false);
   };
 
@@ -167,19 +256,19 @@ export default function ProviderDashboard({ navigation }) {
     ]);
   };
 
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat("es-MX", {
+      style: "currency",
+      currency: "MXN",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  };
+
   const totalProducts = myProducts.length;
   const lowStockProducts = myProducts.filter(
     (p) => p.stock > 0 && p.stock <= 5,
   ).length;
-
-  // Formatear moneda
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('es-MX', {
-      style: 'currency',
-      currency: 'MXN',
-      minimumFractionDigits: 2
-    }).format(amount);
-  };
 
   return (
     <View style={[styles.mainWrapper, { backgroundColor: colors.background }]}>
@@ -189,7 +278,6 @@ export default function ProviderDashboard({ navigation }) {
         translucent
       />
 
-      {/* Círculos de fondo */}
       <Animated.View
         style={[
           styles.bgCircle,
@@ -264,7 +352,6 @@ export default function ProviderDashboard({ navigation }) {
           />
         }
       >
-        {/* Cuadro de Rendimiento Simplificado - CON DATOS REALES */}
         <View
           style={[
             styles.statsCard,
@@ -279,7 +366,7 @@ export default function ProviderDashboard({ navigation }) {
               <ActivityIndicator size="small" color={colors.primary} />
             )}
           </View>
-          
+
           {dashboardStats.loading ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color={colors.primary} />
@@ -291,9 +378,12 @@ export default function ProviderDashboard({ navigation }) {
                   {formatCurrency(dashboardStats.totalSales)}
                 </Text>
                 <Text
-                  style={[styles.statsSubtitle, { color: colors.textSecondary }]}
+                  style={[
+                    styles.statsSubtitle,
+                    { color: colors.textSecondary },
+                  ]}
                 >
-                  Ingresos totales reales
+                  Ingresos totales
                 </Text>
               </View>
               <Icon
@@ -306,25 +396,125 @@ export default function ProviderDashboard({ navigation }) {
           )}
         </View>
 
-        {/* Mini estadísticas ajustadas */}
         <View style={styles.miniStats}>
           <StatCard
             icon="package-variant"
-            value={totalProducts}
-            label="Productos"
-            color={colors.primary}
+            value={dashboardStats.totalOrders}
+            label="Pedidos"
+            color="#3b82f6"
             themeColors={colors}
           />
           <StatCard
-            icon="alert-circle"
-            value={lowStockProducts}
-            label="Bajo stock"
-            color="#F59E0B"
+            icon="clock-outline"
+            value={dashboardStats.pendingOrders}
+            label="Pendientes"
+            color="#f59e0b"
+            themeColors={colors}
+          />
+          <StatCard
+            icon="calendar-today"
+            value={formatCurrency(dashboardStats.todaySales)}
+            label="Hoy"
+            color="#10b981"
             themeColors={colors}
           />
         </View>
 
-        {/* Acciones Rápidas */}
+        <View style={styles.additionalStats}>
+          <View
+            style={[
+              styles.additionalStatCard,
+              { backgroundColor: colors.card },
+            ]}
+          >
+            <Icon name="calendar-month" size={24} color="#8b5cf6" />
+            <View style={styles.additionalStatInfo}>
+              <Text
+                style={[styles.additionalStatValue, { color: colors.text }]}
+              >
+                {formatCurrency(dashboardStats.monthlySales)}
+              </Text>
+              <Text
+                style={[
+                  styles.additionalStatLabel,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                Este mes
+              </Text>
+            </View>
+          </View>
+
+          <View
+            style={[
+              styles.additionalStatCard,
+              { backgroundColor: colors.card },
+            ]}
+          >
+            <Icon name="package" size={24} color="#10b981" />
+            <View style={styles.additionalStatInfo}>
+              <Text
+                style={[styles.additionalStatValue, { color: colors.text }]}
+              >
+                {totalProducts}
+              </Text>
+              <Text
+                style={[
+                  styles.additionalStatLabel,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                Productos
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {lowStockProducts > 0 && (
+          <View
+            style={[
+              styles.lowStockAlert,
+              { backgroundColor: isDarkMode ? "#451a03" : "#fffbeb" },
+            ]}
+          >
+            <View style={styles.lowStockHeader}>
+              <Icon name="alert" size={20} color="#f59e0b" />
+              <Text
+                style={[
+                  styles.lowStockTitle,
+                  { color: isDarkMode ? "#fbbf24" : "#92400e" },
+                ]}
+              >
+                Atención: Stock bajo
+              </Text>
+            </View>
+            <Text
+              style={[
+                styles.lowStockText,
+                { color: isDarkMode ? "#fbbf24" : "#92400e" },
+              ]}
+            >
+              Tienes {lowStockProducts} producto
+              {lowStockProducts > 1 ? "s" : ""} con menos de 5 unidades en stock
+            </Text>
+            <TouchableOpacity
+              style={[
+                styles.lowStockButton,
+                { backgroundColor: colors.primary },
+              ]}
+              onPress={() => navigation.navigate("ProviderProducts")}
+            >
+              <Text style={[styles.lowStockButtonText, { color: "#fff" }]}>
+                Reabastecer
+              </Text>
+              <Icon name="arrow-right" size={16} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          Acciones rápidas
+        </Text>
         <View style={styles.row}>
           <ActionButton
             icon="plus-box"
@@ -346,9 +536,20 @@ export default function ProviderDashboard({ navigation }) {
           />
         </View>
 
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>
-          Tus productos ({myProducts.length})
-        </Text>
+        <View style={styles.productsHeader}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>
+            Tus productos ({myProducts.length})
+          </Text>
+          <TouchableOpacity
+            onPress={() => navigation.navigate("ProviderProducts")}
+            style={styles.viewAllButton}
+          >
+            <Text style={[styles.viewAllText, { color: colors.primary }]}>
+              Ver todos
+            </Text>
+            <Icon name="chevron-right" size={16} color={colors.primary} />
+          </TouchableOpacity>
+        </View>
 
         {loading ? (
           <ActivityIndicator
@@ -356,6 +557,39 @@ export default function ProviderDashboard({ navigation }) {
             color={colors.primary}
             style={{ marginTop: 20 }}
           />
+        ) : myProducts.length === 0 ? (
+          <View style={[styles.emptyState, { backgroundColor: colors.card }]}>
+            <Icon
+              name="package-variant-closed"
+              size={50}
+              color={colors.textSecondary}
+            />
+            <Text style={[styles.emptyStateTitle, { color: colors.text }]}>
+              No tienes productos aún
+            </Text>
+            <Text
+              style={[styles.emptyStateText, { color: colors.textSecondary }]}
+            >
+              Comienza agregando tu primer producto para empezar a vender
+            </Text>
+            <TouchableOpacity
+              style={[
+                styles.emptyStateButton,
+                { backgroundColor: colors.primary },
+              ]}
+              onPress={() => navigation.navigate("AddProduct")}
+            >
+              <Icon
+                name="plus"
+                size={20}
+                color="#FFF"
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.emptyStateButtonText}>
+                Agregar primer producto
+              </Text>
+            </TouchableOpacity>
+          </View>
         ) : (
           <View style={styles.grid}>
             {myProducts.slice(0, 4).map((item) => (
@@ -363,13 +597,16 @@ export default function ProviderDashboard({ navigation }) {
                 key={item.id}
                 item={item}
                 themeColors={colors}
-                onEdit={() => navigation.navigate("ProviderProducts")}
+                onEdit={() =>
+                  navigation.navigate("ProviderProducts", {
+                    editProductId: item.id,
+                  })
+                }
               />
             ))}
           </View>
         )}
 
-        {/* Botón para ver más productos */}
         {myProducts.length > 4 && (
           <TouchableOpacity
             style={[styles.seeMoreBtn, { backgroundColor: colors.card }]}
@@ -381,9 +618,43 @@ export default function ProviderDashboard({ navigation }) {
             <Icon name="chevron-right" size={20} color={colors.primary} />
           </TouchableOpacity>
         )}
+
+        {dashboardStats.totalOrders > 0 && (
+          <View style={[styles.recentOrders, { backgroundColor: colors.card }]}>
+            <View style={styles.recentOrdersHeader}>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                Actividad reciente
+              </Text>
+              <TouchableOpacity
+                onPress={() => navigation.navigate("ProviderOrders")}
+              >
+                <Text style={[styles.viewAllText, { color: colors.primary }]}>
+                  Ver todos
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.recentOrdersContent}>
+              <Icon
+                name="chart-line"
+                size={30}
+                color={colors.primary}
+                opacity={0.2}
+              />
+              <Text
+                style={[
+                  styles.recentOrdersText,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                {dashboardStats.todaySales > 0
+                  ? `Hoy has generado ${formatCurrency(dashboardStats.todaySales)} en ventas`
+                  : `Tienes ${dashboardStats.totalOrders} pedidos en total`}
+              </Text>
+            </View>
+          </View>
+        )}
       </ScrollView>
 
-      {/* Menú Lateral (Drawer) */}
       {menuVisible && (
         <>
           <Animated.View style={[styles.overlay, { opacity: menuOpacity }]}>
@@ -542,6 +813,16 @@ const ProductItem = ({ item, themeColors, onEdit }) => (
       >
         <Icon name="pencil" size={14} color="#fff" />
       </TouchableOpacity>
+      {item.stock <= 5 && item.stock > 0 && (
+        <View style={[styles.lowStockBadge, { backgroundColor: "#f59e0b" }]}>
+          <Text style={styles.lowStockBadgeText}>{item.stock}</Text>
+        </View>
+      )}
+      {item.stock === 0 && (
+        <View style={[styles.lowStockBadge, { backgroundColor: "#ef4444" }]}>
+          <Icon name="cancel" size={12} color="#fff" />
+        </View>
+      )}
     </View>
     <Text
       style={[styles.itemName, { color: themeColors.text }]}
@@ -549,10 +830,24 @@ const ProductItem = ({ item, themeColors, onEdit }) => (
     >
       {item.name}
     </Text>
-    <Text style={styles.itemPrice}>${item.price}</Text>
-    <Text style={[styles.itemStock, { color: themeColors.textSecondary }]}>
-      {item.stock} disp.
-    </Text>
+    <Text style={styles.itemPrice}>${parseFloat(item.price).toFixed(2)}</Text>
+    <View style={styles.itemStockRow}>
+      <Icon
+        name={item.stock > 0 ? "check-circle" : "cancel"}
+        size={12}
+        color={item.stock > 0 ? "#10b981" : "#ef4444"}
+      />
+      <Text
+        style={[
+          styles.itemStock,
+          {
+            color: item.stock > 0 ? themeColors.textSecondary : "#ef4444",
+          },
+        ]}
+      >
+        {item.stock > 0 ? `${item.stock} disp.` : "Agotado"}
+      </Text>
+    </View>
   </View>
 );
 
@@ -563,6 +858,7 @@ const DrawerLink = ({ icon, label, onPress, themeColors }) => (
   </TouchableOpacity>
 );
 
+// Tus estilos originales (sin cambios)
 const styles = StyleSheet.create({
   mainWrapper: { flex: 1 },
   bgCircle: {
@@ -598,11 +894,10 @@ const styles = StyleSheet.create({
   avatarTxt: { color: "#fff", fontSize: 18, fontWeight: "bold" },
   scroll: { padding: 20, paddingBottom: 40 },
   statsCard: {
-    borderRadius: 25,
+    borderRadius: 20,
     padding: 20,
-    elevation: 3,
-    borderLeftWidth: 5,
     marginBottom: 15,
+    borderLeftWidth: 4,
   },
   statsHeaderRow: {
     flexDirection: "row",
@@ -610,58 +905,146 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 10,
   },
-  statsTitle: { fontSize: 14, fontWeight: "700" },
+  statsTitle: { fontSize: 14, fontWeight: "600" },
   statsValueRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 10,
     justifyContent: "space-between",
   },
-  bigAmount: { fontSize: 32, fontWeight: "900" },
+  bigAmount: { fontSize: 28, fontWeight: "900" },
   statsSubtitle: { fontSize: 12, marginTop: 4 },
   loadingContainer: {
-    height: 80,
+    height: 60,
     justifyContent: "center",
     alignItems: "center",
   },
   miniStats: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 20,
+    marginBottom: 15,
     gap: 10,
   },
   miniStatCard: {
     flex: 1,
+    borderRadius: 12,
+    padding: 12,
+    alignItems: "center",
+    elevation: 1,
+  },
+  miniStatValue: {
+    fontSize: 18,
+    fontWeight: "800",
+    marginTop: 6,
+    textAlign: "center",
+    minHeight: 24,
+  },
+  miniStatLabel: {
+    fontSize: 11,
+    marginTop: 4,
+    textAlign: "center",
+  },
+  additionalStats: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 20,
+  },
+  additionalStatCard: {
+    flex: 1,
+    borderRadius: 15,
+    padding: 15,
+    flexDirection: "row",
+    alignItems: "center",
+    elevation: 2,
+    gap: 12,
+  },
+  additionalStatInfo: {
+    flex: 1,
+  },
+  additionalStatValue: {
+    fontSize: 18,
+    fontWeight: "800",
+    marginBottom: 2,
+  },
+  additionalStatLabel: {
+    fontSize: 12,
+  },
+  lowStockAlert: {
+    borderRadius: 15,
+    padding: 15,
+    marginBottom: 20,
+    elevation: 2,
+  },
+  lowStockHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 8,
+  },
+  lowStockTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  lowStockText: {
+    fontSize: 13,
+    marginBottom: 12,
+  },
+  lowStockButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    borderRadius: 10,
+    alignSelf: "flex-start",
+  },
+  lowStockButtonText: {
+    fontSize: 14,
+    fontWeight: "700",
+    marginRight: 8,
+  },
+  row: {
+    flexDirection: "row",
+    gap: 15,
+    marginBottom: 20,
+  },
+  actionBtn: {
+    flex: 1,
     borderRadius: 15,
     padding: 15,
     alignItems: "center",
-    elevation: 2,
-  },
-  miniStatValue: { fontSize: 22, fontWeight: "900", marginTop: 8 },
-  miniStatLabel: { fontSize: 12, marginTop: 4 },
-  row: { flexDirection: "row", gap: 15, marginVertical: 15 },
-  actionBtn: {
-    flex: 1,
-    borderRadius: 20,
-    padding: 15,
-    alignItems: "center",
     borderWidth: 1,
-    elevation: 2,
+    elevation: 1,
   },
   iconBox: {
-    width: 55,
-    height: 55,
-    borderRadius: 18,
+    width: 50,
+    height: 50,
+    borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 10,
+    marginBottom: 8,
   },
-  actionLabel: { fontWeight: "800", fontSize: 13 },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "900",
-    marginTop: 10,
+  actionLabel: {
+    fontWeight: "700",
+    fontSize: 12,
+    textAlign: "center",
+  },
+  productsHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 15,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  viewAllButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  viewAllText: {
+    fontSize: 13,
+    fontWeight: "700",
   },
   grid: {
     flexDirection: "row",
@@ -670,36 +1053,98 @@ const styles = StyleSheet.create({
   },
   itemCard: {
     width: (width - 55) / 2,
-    borderRadius: 20,
-    padding: 10,
+    borderRadius: 15,
+    padding: 12,
     marginBottom: 15,
-    elevation: 2,
+    elevation: 1,
   },
   imgWrap: {
     width: "100%",
     height: 100,
-    borderRadius: 15,
+    borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
     overflow: "hidden",
     position: "relative",
+    marginBottom: 10,
   },
-  img: { width: "100%", height: "100%" },
+  img: {
+    width: "100%",
+    height: "100%",
+  },
   editBtn: {
     position: "absolute",
-    top: 5,
-    right: 5,
-    padding: 6,
+    top: 6,
+    right: 6,
+    padding: 5,
+    borderRadius: 6,
+  },
+  lowStockBadge: {
+    position: "absolute",
+    top: 6,
+    left: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
     borderRadius: 8,
+    minWidth: 20,
+    alignItems: "center",
   },
-  itemName: { fontSize: 14, fontWeight: "700", marginTop: 10, height: 40 },
+  lowStockBadgeText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "bold",
+  },
+  itemName: {
+    fontSize: 13,
+    fontWeight: "700",
+    marginBottom: 4,
+    height: 36,
+    lineHeight: 18,
+  },
   itemPrice: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "900",
+    marginBottom: 2,
     color: "#10b981",
-    marginTop: 5,
   },
-  itemStock: { fontSize: 12, marginTop: 2 },
+  itemStockRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 2,
+    gap: 5,
+  },
+  itemStock: {
+    fontSize: 11,
+  },
+  emptyState: {
+    borderRadius: 15,
+    padding: 30,
+    alignItems: "center",
+    marginBottom: 20,
+    elevation: 1,
+  },
+  emptyStateTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginTop: 15,
+    marginBottom: 8,
+  },
+  emptyStateText: {
+    fontSize: 14,
+    textAlign: "center",
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  emptyStateButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  emptyStateButtonText: {
+    color: "#FFF",
+    fontWeight: "700",
+    fontSize: 14,
+  },
   seeMoreBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -707,12 +1152,34 @@ const styles = StyleSheet.create({
     padding: 15,
     borderRadius: 15,
     marginTop: 10,
-    elevation: 2,
+    elevation: 1,
   },
   seeMoreText: {
     fontSize: 14,
     fontWeight: "700",
     marginRight: 5,
+  },
+  recentOrders: {
+    borderRadius: 20,
+    padding: 20,
+    marginTop: 20,
+    elevation: 2,
+  },
+  recentOrdersHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 15,
+  },
+  recentOrdersContent: {
+    alignItems: "center",
+    paddingVertical: 10,
+  },
+  recentOrdersText: {
+    fontSize: 14,
+    textAlign: "center",
+    marginTop: 10,
+    lineHeight: 20,
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
@@ -728,7 +1195,12 @@ const styles = StyleSheet.create({
     zIndex: 1001,
     padding: 25,
   },
-  drawerHeader: { paddingVertical: 20, borderBottomWidth: 1, marginBottom: 20 },
+  drawerHeader: {
+    paddingVertical: 20,
+    borderBottomWidth: 1,
+    marginBottom: 20,
+    alignItems: "center",
+  },
   dAvatar: {
     width: 60,
     height: 60,
@@ -738,13 +1210,13 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
   dAvatarTxt: { color: "#fff", fontSize: 24, fontWeight: "bold" },
-  dName: { fontSize: 18, fontWeight: "900" },
-  dEmail: { fontSize: 13 },
+  dName: { fontSize: 18, fontWeight: "900", textAlign: "center" },
+  dEmail: { fontSize: 13, textAlign: "center", marginBottom: 10 },
   dContent: { flex: 1 },
   dLink: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 15,
+    paddingVertical: 12,
     gap: 15,
   },
   themeSwitchRow: {

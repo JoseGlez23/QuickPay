@@ -1,5 +1,4 @@
-// src/screens/PaymentScreen.js - VERSIÓN CORREGIDA
-import React, { useState } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   View,
   Text,
@@ -20,14 +19,61 @@ import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import { useOrders } from "../context/OrderContext";
+import { useStripe } from "@stripe/stripe-react-native";
+import { supabase } from "../utils/supabase"; // Importar supabase para obtener provider_id
+
+// CAMBIA ESTA URL CADA VEZ QUE REINICIES NGROK
+const API_URL = "https://carolin-nonprovisional-correctly.ngrok-free.dev"; // ← ¡Pon aquí tu URL real de ngrok!
+
+// Componente de input (sin cambios)
+const CustomInput = React.memo(
+  ({
+    label,
+    placeholder,
+    value,
+    onChangeText,
+    keyboardType = "default",
+    maxLength,
+    theme,
+    isProcessing,
+    error,
+  }) => (
+    <View style={styles.inputGroup}>
+      <Text style={[styles.label, { color: theme.textSecondary }]}>
+        {label}
+      </Text>
+      <TextInput
+        style={[
+          styles.input,
+          {
+            backgroundColor: theme.background,
+            borderColor: error ? "#EF4444" : theme.border,
+            color: theme.text,
+          },
+        ]}
+        placeholder={placeholder}
+        placeholderTextColor={theme.textSecondary + "80"}
+        value={value}
+        onChangeText={onChangeText}
+        keyboardType={keyboardType}
+        maxLength={maxLength}
+        editable={!isProcessing}
+        selectionColor={theme.primary}
+      />
+      {error && <Text style={styles.errorText}>{error}</Text>}
+    </View>
+  ),
+);
 
 export default function PaymentScreen({ route, navigation }) {
   const { colors, isDarkMode } = useTheme();
   const { user, cart: cartFromAuth, cartTotal, clearCart } = useAuth();
-  const { createOrder, refreshOrders } = useOrders();
+  const { refreshOrders } = useOrders();
+  const { initPaymentSheet, presentPaymentSheet } = useStripe();
 
   const cart = cartFromAuth || [];
   const total = cartTotal || 0;
+  const totalConImpuestos = total * 1.15;
 
   const [form, setForm] = useState({
     cp: "",
@@ -35,171 +81,404 @@ export default function PaymentScreen({ route, navigation }) {
     municipio: "",
     localidad: "",
     colonia: "",
-    nombre: "",
-    telefono: "",
+    nombre: user?.name || "",
+    telefono: user?.phone || "",
     tipoDomicilio: "Residencial",
   });
 
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [errors, setErrors] = useState({});
   const [showAlertModal, setShowAlertModal] = useState(false);
+  const [showCardModal, setShowCardModal] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [enrichedCart, setEnrichedCart] = useState([]);
 
-  const isFormValid =
-    form.cp.trim().length > 0 &&
-    form.estado.trim().length > 0 &&
-    form.municipio.trim().length > 0 &&
-    form.colonia.trim().length > 0 &&
-    form.nombre.trim().length > 0 &&
-    form.telefono.trim().length >= 10;
+  // Enriquecer carrito con información de proveedor
+  useEffect(() => {
+    const enrichCartWithProviderInfo = async () => {
+      if (cart.length === 0) {
+        setEnrichedCart([]);
+        return;
+      }
+
+      try {
+        const enrichedItems = await Promise.all(
+          cart.map(async (item) => {
+            try {
+              // Obtener información del producto desde Supabase
+              const { data: productData, error } = await supabase
+                .from("products")
+                .select("provider_id, name, price, images, stock")
+                .eq("id", item.id)
+                .single();
+
+              if (error) {
+                console.error(`Error obteniendo producto ${item.id}:`, error);
+                return {
+                  ...item,
+                  provider_id: item.provider_id || null,
+                  price: item.price || 0,
+                  name: item.name || "Producto",
+                  images: item.images || [],
+                };
+              }
+
+              return {
+                ...item,
+                provider_id: productData.provider_id,
+                price: productData.price || item.price || 0,
+                name: productData.name || item.name || "Producto",
+                images: productData.images || item.images || [],
+                stock: productData.stock || 0,
+              };
+            } catch (error) {
+              console.error(`Error procesando producto ${item.id}:`, error);
+              return {
+                ...item,
+                provider_id: item.provider_id || null,
+                price: item.price || 0,
+                name: item.name || "Producto",
+                images: item.images || [],
+                stock: 0,
+              };
+            }
+          })
+        );
+
+        setEnrichedCart(enrichedItems);
+      } catch (error) {
+        console.error("Error enriqueciendo carrito:", error);
+        setEnrichedCart(cart);
+      }
+    };
+
+    enrichCartWithProviderInfo();
+  }, [cart]);
+
+  // Validación automática (sin loop infinito)
+  const validateForm = useMemo(() => {
+    const newErrors = {};
+
+    if (!/^\d{5}$/.test(form.cp.trim()))
+      newErrors.cp = "Código postal inválido (5 dígitos)";
+    if (!/^\d{10}$/.test(form.telefono.trim()))
+      newErrors.telefono = "Teléfono inválido (10 dígitos)";
+    if (!form.estado.trim()) newErrors.estado = "Estado es requerido";
+    if (!form.municipio.trim()) newErrors.municipio = "Municipio es requerido";
+    if (!form.colonia.trim()) newErrors.colonia = "Colonia es requerida";
+    if (!form.nombre.trim()) newErrors.nombre = "Nombre es requerido";
+    if (!form.localidad.trim()) newErrors.localidad = "Localidad es requerida";
+
+    return newErrors;
+  }, [form]);
+
+  useEffect(() => {
+    setErrors(validateForm);
+  }, [validateForm]);
+
+  const updateFormField = (field, value) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const isFormValid = Object.keys(errors).length === 0;
 
   const handlePressContinuar = () => {
+    if (cart.length === 0) {
+      Alert.alert("Carrito vacío", "Agrega productos al carrito primero");
+      return;
+    }
+
     if (isFormValid) {
-      setShowConfirmModal(true);
+      setShowCardModal(true);
     } else {
       setShowAlertModal(true);
     }
   };
 
-  const handleCreateOrder = async () => {
-    setShowConfirmModal(false);
+  const handleProcessPayment = async () => {
+    if (cart.length === 0) return;
+
     setIsProcessing(true);
+    setShowCardModal(false);
 
     try {
-      if (!user?.id) {
-        Alert.alert("Error", "Usuario no autenticado.");
-        setIsProcessing(false);
-        return;
-      }
+      console.log("User ID que se envía:", user?.id);
+      console.log("Carrito enriquecido:", enrichedCart);
 
-      if (cart.length === 0) {
-        Alert.alert("Error", "El carrito está vacío.");
-        setIsProcessing(false);
-        return;
-      }
+      const shippingAddress = `${form.colonia}, ${form.localidad}, ${form.municipio}, ${form.estado}, CP: ${form.cp}`;
 
-      const productosSinProvider = cart.filter((item) => !item.provider_id);
+      // Preparar cartItems con información completa
+      const cartItems = enrichedCart.map((item) => ({
+        id: item.id,
+        name: item.name,
+        price: parseFloat(item.price) || 0,
+        quantity: item.quantity || 1,
+        provider_id: item.provider_id, // Asegurar que enviamos provider_id
+      }));
 
-      if (productosSinProvider.length > 0) {
-        Alert.alert(
-          "Error",
-          `Hay ${productosSinProvider.length} producto(s) sin proveedor asignado.`,
-        );
-        setIsProcessing(false);
-        return;
-      }
+      console.log("CartItems a enviar:", cartItems);
 
-      const productosPorProveedor = {};
+      const paymentData = {
+        amount: totalConImpuestos,
+        currency: "mxn",
+        userId: user?.id,
+        email: user?.email || "cliente@quickpay.com",
+        name: form.nombre,
+        phone: form.telefono,
+        shippingAddress,
+        cartItems: cartItems,
+      };
 
-      cart.forEach((item) => {
-        const providerId = item.provider_id;
+      console.log("Enviando a backend:", `${API_URL}/create-payment-intent`);
+      console.log("Body enviado:", JSON.stringify(paymentData, null, 2));
 
-        if (!productosPorProveedor[providerId]) {
-          productosPorProveedor[providerId] = {
-            providerId,
-            items: [],
-            total: 0,
-          };
-        }
-
-        const itemTotal = (item.price || 0) * (item.quantity || 1);
-        productosPorProveedor[providerId].items.push({
-          id: item.id,
-          name: item.name,
-          price: item.price,
-          quantity: item.quantity || 1,
-          stock: item.stock || 0,
-        });
-        productosPorProveedor[providerId].total += itemTotal;
+      const response = await fetch(`${API_URL}/create-payment-intent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(paymentData),
       });
 
-      const fullAddress = `${form.colonia}, ${form.localidad}, ${form.municipio}, ${form.estado}, CP: ${form.cp}`;
+      console.log("Respuesta recibida - Status:", response.status);
+      console.log("Content-Type:", response.headers.get("content-type"));
 
-      const pedidosCreados = [];
+      // Leemos como TEXTO primero para depurar
+      const responseText = await response.text();
+      console.log(
+        "Respuesta cruda del servidor:",
+        responseText.substring(0, 300),
+      );
 
-      for (const [providerId, datosProveedor] of Object.entries(
-        productosPorProveedor,
-      )) {
-        const orderData = {
-          client_id: user.id,
-          provider_id: providerId,
-          total: datosProveedor.total,
-          shipping_address: fullAddress,
-          status: "pending",
-          payment_status: "paid",
-          payment_method: "manual",
-          cancelable_until: new Date(
-            Date.now() + 15 * 60 * 60 * 1000,
-          ).toISOString(),
-          notes: `Teléfono: ${form.telefono}, Nombre: ${form.nombre}, Tipo: ${form.tipoDomicilio}`,
-        };
+      if (!response.ok) {
+        throw new Error(`Error HTTP ${response.status}: ${responseText}`);
+      }
 
-        const result = await createOrder(orderData, datosProveedor.items);
+      // Solo ahora parseamos como JSON
+      const data = JSON.parse(responseText);
 
-        if (result.success) {
-          pedidosCreados.push(result.order);
-        } else {
-          throw new Error(
-            `Error creando pedido para proveedor ${providerId}: ${result.error}`,
-          );
+      const { clientSecret } = data;
+
+      const { error: initError } = await initPaymentSheet({
+        merchantDisplayName: "QuickPay",
+        paymentIntentClientSecret: clientSecret,
+        allowsDelayedPaymentMethods: true,
+        defaultBillingDetails: {
+          name: form.nombre,
+          email: user?.email,
+          phone: form.telefono,
+          address: {
+            line1: shippingAddress,
+            postalCode: form.cp,
+            city: form.municipio,
+            state: form.estado,
+            country: "MX",
+          },
+        },
+      });
+
+      if (initError) throw new Error(initError.message);
+
+      const { error: presentError } = await presentPaymentSheet();
+
+      if (presentError) {
+        if (presentError.code === "Canceled") {
+          Alert.alert("Pago cancelado", "Puedes intentarlo de nuevo");
+          return;
         }
+        throw new Error(presentError.message);
       }
 
-      if (pedidosCreados.length > 0) {
-        await refreshOrders();
-        clearCart();
+      const confirmResponse = await fetch(`${API_URL}/confirm-payment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          paymentIntentId: data.paymentIntentId,
+          userId: user?.id,
+          totalAmount: totalConImpuestos,
+          shippingAddress,
+          cartItems: cartItems,
+          notes: `Compra QuickPay - ${form.tipoDomicilio} - Teléfono: ${form.telefono}`,
+        }),
+      });
 
-        Alert.alert(
-          "Pedido Creado Exitosamente",
-          `Tu pedido ha sido registrado.\n\nTotal: $${total.toFixed(2)}`,
-          [
-            {
-              text: "Ver Mis Pedidos",
-              onPress: () => {
-                navigation.navigate("ClientTabs", {
-                  screen: "ClientOrders",
-                });
-              },
-            },
-            {
-              text: "Seguir Comprando",
-              onPress: () => {
-                navigation.navigate("ClientTabs", {
-                  screen: "ClientHome",
-                });
-              },
-            },
-          ],
-        );
+      const confirmText = await confirmResponse.text();
+      console.log(
+        "Respuesta de confirm-payment:",
+        confirmText.substring(0, 300),
+      );
 
-        setForm({
-          cp: "",
-          estado: "",
-          municipio: "",
-          localidad: "",
-          colonia: "",
-          nombre: "",
-          telefono: "",
-          tipoDomicilio: "Residencial",
-        });
+      if (!confirmResponse.ok) {
+        throw new Error(`Error en confirmación: ${confirmText}`);
       }
+
+      const confirmData = JSON.parse(confirmText);
+
+      if (!confirmData.success) {
+        throw new Error(confirmData.error || "Error confirmando pago");
+      }
+
+      clearCart();
+      await refreshOrders();
+
+      Alert.alert(
+        "¡Compra completada!",
+        `Pago exitoso por $${totalConImpuestos.toLocaleString("es-MX", { minimumFractionDigits: 2 })} MXN\n\nSe ha creado la orden: ${confirmData.orderNumber}`,
+        [
+          {
+            text: "Ver mis pedidos",
+            onPress: () =>
+              navigation.navigate("ClientTabs", { screen: "ClientOrders" }),
+          },
+          { 
+            text: "Continuar comprando",
+            onPress: () => navigation.goBack()
+          },
+        ],
+      );
+
+      setForm({
+        cp: "",
+        estado: "",
+        municipio: "",
+        localidad: "",
+        colonia: "",
+        nombre: user?.name || "",
+        telefono: user?.phone || "",
+        tipoDomicilio: "Residencial",
+      });
+      
+      // Limpiar carrito enriquecido
+      setEnrichedCart([]);
     } catch (error) {
+      console.error("Error en pago:", error);
       Alert.alert(
         "Error",
-        error.message || "Ocurrió un error al procesar el pedido.",
+        error.message ||
+          "No se pudo completar el pago.\n\nRevisa tu conexión o el servidor.",
       );
     } finally {
       setIsProcessing(false);
     }
   };
 
+  const renderCardModal = () => (
+    <Modal visible={showCardModal} transparent animationType="slide">
+      <View
+        style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}
+      >
+        <View style={[styles.modalSheet, { backgroundColor: colors.card }]}>
+          <View style={styles.modalHandle} />
+          <Text style={[styles.modalTitle, { color: colors.text }]}>
+            Confirmar Pago
+          </Text>
+
+          <View
+            style={[
+              styles.modalTotalBox,
+              { backgroundColor: colors.background },
+            ]}
+          >
+            <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
+              Total a pagar:
+            </Text>
+            <Text style={[styles.modalTotalValue, { color: colors.primary }]}>
+              $
+              {totalConImpuestos.toLocaleString("es-MX", {
+                minimumFractionDigits: 2,
+              })}
+            </Text>
+            <Text
+              style={{
+                color: colors.textSecondary,
+                fontSize: 12,
+                marginTop: 5,
+              }}
+            >
+              Incluye impuestos (15%)
+            </Text>
+          </View>
+
+          {/* Mostrar proveedores involucrados */}
+          {enrichedCart.length > 0 && (
+            <View style={[styles.providersInfo, { backgroundColor: colors.background + '40' }]}>
+              <Text style={[styles.providersTitle, { color: colors.textSecondary }]}>
+                Proveedores involucrados:
+              </Text>
+              {Array.from(new Set(enrichedCart.map(item => item.provider_id))).map((providerId, index) => {
+                const providerItems = enrichedCart.filter(item => item.provider_id === providerId);
+                const providerTotal = providerItems.reduce((sum, item) => 
+                  sum + (item.price * (item.quantity || 1)), 0
+                );
+                
+                return (
+                  <View key={index} style={styles.providerItem}>
+                    <Icon name="store" size={16} color={colors.primary} />
+                    <Text style={[styles.providerText, { color: colors.text }]}>
+                      {providerItems.length} producto{providerItems.length > 1 ? 's' : ''} • ${providerTotal.toFixed(2)}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
+          <Text
+            style={[
+              styles.modalInfoText,
+              { color: colors.textSecondary, marginTop: 20 },
+            ]}
+          >
+            Tarjeta de prueba (modo test):\n4242 4242 4242 4242\nFecha:
+            cualquier futura\nCVC: 123
+          </Text>
+
+          <View style={styles.modalActions}>
+            <TouchableOpacity
+              style={[styles.btnFlex, { backgroundColor: colors.card }]}
+              onPress={() => setShowCardModal(false)}
+              disabled={isProcessing}
+            >
+              <Text style={{ color: colors.textSecondary, fontWeight: "700" }}>
+                Cancelar
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.btnFlex,
+                {
+                  backgroundColor: colors.primary,
+                  opacity: isProcessing ? 0.5 : 1,
+                },
+              ]}
+              onPress={handleProcessPayment}
+              disabled={isProcessing}
+            >
+              {isProcessing ? (
+                <ActivityIndicator color="#FFF" size="small" />
+              ) : (
+                <>
+                  <Icon
+                    name="lock"
+                    size={20}
+                    color="#FFF"
+                    style={{ marginRight: 8 }}
+                  />
+                  <Text style={styles.btnTextWhite}>Pagar ahora</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
   return (
     <SafeAreaView
       style={[styles.container, { backgroundColor: colors.background }]}
     >
-      <StatusBar
-        barStyle={isDarkMode ? "light-content" : "dark-content"}
-        backgroundColor={colors.background}
-      />
+      <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
+
+      {renderCardModal()}
 
       <Modal visible={showAlertModal} transparent animationType="fade">
         <View
@@ -213,12 +492,13 @@ export default function PaymentScreen({ route, navigation }) {
           >
             <Icon name="alert-circle" size={50} color="#EF4444" />
             <Text style={[styles.modalAlertTitle, { color: colors.text }]}>
-              Datos Faltantes
+              Datos incompletos
             </Text>
             <Text
               style={[styles.modalAlertText, { color: colors.textSecondary }]}
             >
-              Por favor completa todos los campos marcados con * para continuar.
+              {Object.values(errors).filter(Boolean).join("\n") ||
+                "Revisa los campos requeridos"}
             </Text>
             <TouchableOpacity
               style={[styles.btnAction, { backgroundColor: colors.primary }]}
@@ -230,106 +510,20 @@ export default function PaymentScreen({ route, navigation }) {
         </View>
       </Modal>
 
-      <Modal visible={showConfirmModal} transparent animationType="slide">
-        <View
-          style={[
-            styles.modalOverlay,
-            { backgroundColor: colors.modalOverlay },
-          ]}
-        >
-          <View style={[styles.modalSheet, { backgroundColor: colors.card }]}>
-            <View style={styles.modalHandle} />
-            <Text style={[styles.modalTitle, { color: colors.text }]}>
-              Confirmar Pedido
-            </Text>
-
-            <View
-              style={[
-                styles.modalTotalBox,
-                { backgroundColor: colors.background },
-              ]}
-            >
-              <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
-                Total a transferir:
-              </Text>
-              <Text style={[styles.modalTotalValue, { color: colors.primary }]}>
-                ${(total * 1.15).toFixed(2)}
-              </Text>
-              <Text
-                style={{
-                  color: colors.textSecondary,
-                  fontSize: 12,
-                  marginTop: 5,
-                }}
-              >
-                Incluye impuestos (15%)
-              </Text>
-            </View>
-
-            <Text
-              style={[styles.modalInfoText, { color: colors.textSecondary }]}
-            >
-              • El pedido se creará con estado "Pendiente"
-              {"\n"}• Se reducirá el stock de los productos
-              {"\n"}• Recibirás una notificación cuando el proveedor procese tu
-              pedido
-            </Text>
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={[
-                  styles.btnFlex,
-                  { backgroundColor: isDarkMode ? "#334155" : "#F1F5F9" },
-                ]}
-                onPress={() => setShowConfirmModal(false)}
-                disabled={isProcessing}
-              >
-                <Text
-                  style={{
-                    color: colors.textSecondary,
-                    fontWeight: "700",
-                    opacity: isProcessing ? 0.5 : 1,
-                  }}
-                >
-                  Regresar
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.btnFlex,
-                  styles.btnMain,
-                  {
-                    backgroundColor: colors.primary,
-                    opacity: isProcessing ? 0.7 : 1,
-                  },
-                ]}
-                onPress={handleCreateOrder}
-                disabled={isProcessing}
-              >
-                {isProcessing ? (
-                  <ActivityIndicator color="#FFF" size="small" />
-                ) : (
-                  <Text style={styles.btnTextWhite}>Confirmar Pedido</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : null}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 20}
       >
         <ScrollView
-          showsVerticalScrollIndicator={false}
           contentContainerStyle={[styles.scrollContent, { paddingBottom: 200 }]}
+          keyboardShouldPersistTaps="handled"
         >
           <Text style={[styles.mainTitle, { color: colors.text }]}>
             Finalizar Compra
           </Text>
 
+          {/* Resumen del Pedido */}
           <View
             style={[
               styles.card,
@@ -345,7 +539,7 @@ export default function PaymentScreen({ route, navigation }) {
               </Text>
             </View>
 
-            {cart.map((item, index) => (
+            {(enrichedCart.length > 0 ? enrichedCart : cart).map((item, index) => (
               <View key={index} style={styles.productRow}>
                 <Image
                   source={{
@@ -361,16 +555,21 @@ export default function PaymentScreen({ route, navigation }) {
                     {item.name}
                   </Text>
                   <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                    Cantidad: {item.quantity} × ${item.price.toFixed(2)}
+                    Cantidad: {item.quantity || 1} × $
+                    {(item.price || 0).toFixed(2)}
                   </Text>
-                  {item.provider_name && (
-                    <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
-                      Proveedor: {item.provider_name}
+                  {item.provider_id && (
+                    <Text style={{ color: colors.primary, fontSize: 11, marginTop: 2 }}>
+                      <Icon name="store" size={10} /> Proveedor
                     </Text>
                   )}
                 </View>
                 <Text style={[styles.productPrice, { color: colors.primary }]}>
-                  ${(item.price * item.quantity).toFixed(2)}
+                  $
+                  {((item.price || 0) * (item.quantity || 1)).toLocaleString(
+                    "es-MX",
+                    { minimumFractionDigits: 2 },
+                  )}
                 </Text>
               </View>
             ))}
@@ -383,7 +582,7 @@ export default function PaymentScreen({ route, navigation }) {
                 Subtotal:
               </Text>
               <Text style={[styles.totalValue, { color: colors.text }]}>
-                ${total.toFixed(2)}
+                ${total.toLocaleString("es-MX", { minimumFractionDigits: 2 })}
               </Text>
             </View>
             <View style={styles.totalRow}>
@@ -391,7 +590,10 @@ export default function PaymentScreen({ route, navigation }) {
                 Impuestos (15%):
               </Text>
               <Text style={[styles.totalValue, { color: colors.text }]}>
-                ${(total * 0.15).toFixed(2)}
+                $
+                {(total * 0.15).toLocaleString("es-MX", {
+                  minimumFractionDigits: 2,
+                })}
               </Text>
             </View>
             <View style={styles.totalRow}>
@@ -409,11 +611,15 @@ export default function PaymentScreen({ route, navigation }) {
                   { color: colors.primary, fontWeight: "bold" },
                 ]}
               >
-                ${(total * 1.15).toFixed(2)}
+                $
+                {totalConImpuestos.toLocaleString("es-MX", {
+                  minimumFractionDigits: 2,
+                })}
               </Text>
             </View>
           </View>
 
+          {/* Datos de Entrega */}
           <View
             style={[
               styles.card,
@@ -429,12 +635,14 @@ export default function PaymentScreen({ route, navigation }) {
 
             <CustomInput
               label="CÓDIGO POSTAL *"
-              placeholder="Escribe aquí tu CP"
+              placeholder="5 dígitos (ej: 01000)"
               value={form.cp}
-              onChangeText={(t) => setForm({ ...form, cp: t })}
+              onChangeText={(t) => updateFormField("cp", t)}
               keyboardType="numeric"
               maxLength={5}
               theme={colors}
+              isProcessing={isProcessing}
+              error={errors.cp}
             />
 
             <View style={styles.row}>
@@ -443,8 +651,10 @@ export default function PaymentScreen({ route, navigation }) {
                   label="ESTADO *"
                   placeholder="Estado"
                   value={form.estado}
-                  onChangeText={(t) => setForm({ ...form, estado: t })}
+                  onChangeText={(t) => updateFormField("estado", t)}
                   theme={colors}
+                  isProcessing={isProcessing}
+                  error={errors.estado}
                 />
               </View>
               <View style={styles.halfInput}>
@@ -452,8 +662,10 @@ export default function PaymentScreen({ route, navigation }) {
                   label="MUNICIPIO *"
                   placeholder="Municipio"
                   value={form.municipio}
-                  onChangeText={(t) => setForm({ ...form, municipio: t })}
+                  onChangeText={(t) => updateFormField("municipio", t)}
                   theme={colors}
+                  isProcessing={isProcessing}
+                  error={errors.municipio}
                 />
               </View>
             </View>
@@ -462,16 +674,20 @@ export default function PaymentScreen({ route, navigation }) {
               label="LOCALIDAD *"
               placeholder="Escribe aquí tu localidad"
               value={form.localidad}
-              onChangeText={(t) => setForm({ ...form, localidad: t })}
+              onChangeText={(t) => updateFormField("localidad", t)}
               theme={colors}
+              isProcessing={isProcessing}
+              error={errors.localidad}
             />
 
             <CustomInput
               label="COLONIA *"
               placeholder="Escribe aquí tu colonia"
               value={form.colonia}
-              onChangeText={(t) => setForm({ ...form, colonia: t })}
+              onChangeText={(t) => updateFormField("colonia", t)}
               theme={colors}
+              isProcessing={isProcessing}
+              error={errors.colonia}
             />
 
             <Text style={[styles.cardHeaderSmall, { color: colors.text }]}>
@@ -482,18 +698,22 @@ export default function PaymentScreen({ route, navigation }) {
               label="NOMBRE COMPLETO *"
               placeholder="Escribe tu nombre completo"
               value={form.nombre}
-              onChangeText={(t) => setForm({ ...form, nombre: t })}
+              onChangeText={(t) => updateFormField("nombre", t)}
               theme={colors}
+              isProcessing={isProcessing}
+              error={errors.nombre}
             />
 
             <CustomInput
               label="TELÉFONO *"
-              placeholder="10 dígitos"
+              placeholder="10 dígitos (ej: 5512345678)"
               value={form.telefono}
-              onChangeText={(t) => setForm({ ...form, telefono: t })}
+              onChangeText={(t) => updateFormField("telefono", t)}
               keyboardType="phone-pad"
               maxLength={10}
               theme={colors}
+              isProcessing={isProcessing}
+              error={errors.telefono}
             />
 
             <Text
@@ -518,7 +738,8 @@ export default function PaymentScreen({ route, navigation }) {
                       borderColor: colors.border,
                     },
                   ]}
-                  onPress={() => setForm({ ...form, tipoDomicilio: tipo })}
+                  onPress={() => updateFormField("tipoDomicilio", tipo)}
+                  disabled={isProcessing}
                 >
                   <Text
                     style={[
@@ -540,14 +761,7 @@ export default function PaymentScreen({ route, navigation }) {
         <View
           style={[
             styles.bottomNav,
-            {
-              backgroundColor: colors.card,
-              borderTopColor: colors.border,
-              shadowColor: colors.text,
-              shadowOpacity: 0.1,
-              shadowRadius: 10,
-              elevation: 20,
-            },
+            { backgroundColor: colors.card, borderTopColor: colors.border },
           ]}
         >
           <View style={styles.totalInfo}>
@@ -555,7 +769,10 @@ export default function PaymentScreen({ route, navigation }) {
               Total Final
             </Text>
             <Text style={[styles.totalBig, { color: colors.primary }]}>
-              ${(total * 1.15).toFixed(2)}
+              $
+              {totalConImpuestos.toLocaleString("es-MX", {
+                minimumFractionDigits: 2,
+              })}
             </Text>
           </View>
           <TouchableOpacity
@@ -563,16 +780,23 @@ export default function PaymentScreen({ route, navigation }) {
               styles.btnPay,
               {
                 backgroundColor: colors.primary,
-                opacity: isFormValid ? 1 : 0.5,
+                opacity:
+                  isFormValid && cart.length > 0 && !isProcessing ? 1 : 0.5,
               },
             ]}
             onPress={handlePressContinuar}
-            disabled={!isFormValid || cart.length === 0}
+            disabled={!isFormValid || cart.length === 0 || isProcessing}
           >
-            <Text style={styles.btnPayText}>
-              {cart.length === 0 ? "Carrito Vacío" : "Continuar"}
-            </Text>
-            <Icon name="chevron-right" size={24} color="#FFF" />
+            {isProcessing ? (
+              <ActivityIndicator color="#FFF" size="small" />
+            ) : (
+              <>
+                <Text style={styles.btnPayText}>
+                  {cart.length === 0 ? "Carrito Vacío" : "Continuar al Pago"}
+                </Text>
+                <Icon name="chevron-right" size={24} color="#FFF" />
+              </>
+            )}
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -580,36 +804,7 @@ export default function PaymentScreen({ route, navigation }) {
   );
 }
 
-const CustomInput = ({
-  label,
-  placeholder,
-  value,
-  onChangeText,
-  keyboardType = "default",
-  maxLength,
-  theme,
-}) => (
-  <View style={styles.inputGroup}>
-    <Text style={[styles.label, { color: theme.textSecondary }]}>{label}</Text>
-    <TextInput
-      style={[
-        styles.input,
-        {
-          backgroundColor: theme.background,
-          borderColor: theme.border,
-          color: theme.text,
-        },
-      ]}
-      placeholder={placeholder}
-      placeholderTextColor={theme.textSecondary + "80"}
-      value={value}
-      onChangeText={onChangeText}
-      keyboardType={keyboardType}
-      maxLength={maxLength}
-    />
-  </View>
-);
-
+// Estilos actualizados
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { padding: 20 },
@@ -684,6 +879,12 @@ const styles = StyleSheet.create({
     padding: 14,
     fontSize: 15,
     fontWeight: "500",
+  },
+  errorText: {
+    color: "#EF4444",
+    fontSize: 11,
+    marginTop: 4,
+    marginLeft: 4,
   },
   row: { flexDirection: "row", gap: 10 },
   halfInput: { flex: 1 },
@@ -804,6 +1005,26 @@ const styles = StyleSheet.create({
     marginVertical: 15,
     paddingHorizontal: 10,
   },
+  providersInfo: {
+    width: "100%",
+    padding: 15,
+    borderRadius: 15,
+    marginTop: 10,
+  },
+  providersTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+  providerItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: 4,
+  },
+  providerText: {
+    fontSize: 13,
+    marginLeft: 8,
+  },
   modalActions: {
     flexDirection: "row",
     gap: 12,
@@ -823,5 +1044,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 6,
     elevation: 4,
+    flexDirection: "row",
   },
 });

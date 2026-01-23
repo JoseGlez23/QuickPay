@@ -17,8 +17,12 @@ const ProductContext = createContext();
 
 export const ProductProvider = ({ children }) => {
   const { user } = useAuth();
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
+
+  const [allProducts, setAllProducts] = useState([]);
+  const [providerProducts, setProviderProducts] = useState([]);
+
+  const [loadingAll, setLoadingAll] = useState(true);
+  const [loadingProvider, setLoadingProvider] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -33,21 +37,31 @@ export const ProductProvider = ({ children }) => {
     initCategories();
   }, []);
 
-  // FUNCIÓN PARA SUBIR IMÁGENES A SUPABASE
+  useEffect(() => {
+    if (!user) {
+      setAllProducts([]);
+      setProviderProducts([]);
+      return;
+    }
+
+    if (user.role === "provider") {
+      loadProviderProducts(user.id);
+    } else {
+      loadAllProducts();
+    }
+  }, [user?.id, user?.role]);
+
   const uploadImageToSupabase = async (imageUri, productId) => {
     try {
-      // Leer la imagen como base64
       const base64 = await FileSystem.readAsStringAsync(imageUri, {
         encoding: FileSystem.EncodingType.Base64,
       });
 
-      // Generar nombre único para la imagen
       const fileName = `product_${productId}_${uuidv4()}.jpg`;
       const filePath = `products/${fileName}`;
 
-      console.log(`📤 Subiendo imagen: ${fileName}`);
+      console.log(`Subiendo imagen: ${fileName}`);
 
-      // Subir a Supabase Storage
       const { data, error: uploadError } = await supabase.storage
         .from('product-images')
         .upload(filePath, decode(base64), {
@@ -60,12 +74,11 @@ export const ProductProvider = ({ children }) => {
         throw uploadError;
       }
 
-      // Obtener URL pública
       const { data: urlData } = supabase.storage
         .from('product-images')
         .getPublicUrl(filePath);
 
-      console.log(`✅ Imagen subida: ${urlData.publicUrl}`);
+      console.log(`Imagen subida: ${urlData.publicUrl}`);
       return urlData.publicUrl;
     } catch (error) {
       console.error('Error procesando imagen:', error);
@@ -73,10 +86,9 @@ export const ProductProvider = ({ children }) => {
     }
   };
 
-  // FUNCIÓN PARA PROCESAR IMÁGENES (nuevas y existentes)
   const processImagesForUpdate = async (images, productId, existingImages = []) => {
-    console.log('🔄 Procesando imágenes:', {
-      totalImágenes: images.length,
+    console.log('Procesando imágenes:', {
+      totalImagenes: images.length,
       nuevas: images.filter(img => !img.startsWith('http')).length,
       existentes: existingImages.length
     });
@@ -85,33 +97,27 @@ export const ProductProvider = ({ children }) => {
 
     for (let i = 0; i < images.length; i++) {
       const image = images[i];
-      
-      // Si ya es una URL de Supabase, mantenerla
+
       if (image.startsWith('https://') && image.includes('supabase')) {
-        console.log(`🔗 Manteniendo imagen existente ${i + 1}`);
+        console.log(`Manteniendo imagen existente ${i + 1}`);
         processedImages.push(image);
-      } 
-      // Si es una URL local (file://), subirla
-      else if (image.startsWith('file://') || image.startsWith('content://')) {
-        console.log(`📤 Subiendo nueva imagen ${i + 1}`);
+      } else if (image.startsWith('file://') || image.startsWith('content://')) {
+        console.log(`Subiendo nueva imagen ${i + 1}`);
         try {
           const uploadedUrl = await uploadImageToSupabase(image, productId);
           processedImages.push(uploadedUrl);
         } catch (error) {
           console.error(`Error subiendo imagen ${i + 1}:`, error);
-          // Mantener imagen existente si hay error
           if (existingImages[i]) {
             processedImages.push(existingImages[i]);
           }
         }
-      } 
-      // Si ya es una URL pública pero no de supabase
-      else {
+      } else {
         processedImages.push(image);
       }
     }
 
-    console.log(`✅ Imágenes procesadas: ${processedImages.length}`);
+    console.log(`Imagenes procesadas: ${processedImages.length}`);
     return processedImages;
   };
 
@@ -159,18 +165,16 @@ export const ProductProvider = ({ children }) => {
     try {
       let categoryId = product.categoryId;
 
-      // Si no hay categoryId pero hay category (nombre), obtener el ID
       if (!categoryId && product.category && product.category !== "other") {
         categoryId = await getCategoryId(product.category);
       }
 
-      // Si aún no hay categoryId, usar "other"
       if (!categoryId) {
         const defaultCategoryId = await getCategoryId("other");
         categoryId = defaultCategoryId;
       }
 
-      console.log('📊 Preparando datos para Supabase:', {
+      console.log('Preparando datos para Supabase:', {
         categoryId,
         category: product.category,
         imagesCount: product.images?.length || 0
@@ -196,13 +200,12 @@ export const ProductProvider = ({ children }) => {
     }
   };
 
-  // CARGAR TODOS LOS PRODUCTOS (actualizado)
   const loadAllProducts = useCallback(async () => {
     try {
-      setLoading(true);
+      setLoadingAll(true);
       setError(null);
 
-      console.log("📦 Cargando todos los productos...");
+      console.log("Cargando todos los productos...");
 
       const { data, error: supabaseError } = await supabase
         .from("products")
@@ -216,59 +219,99 @@ export const ProductProvider = ({ children }) => {
 
       if (supabaseError) throw supabaseError;
 
-      console.log("📊 Productos cargados:", data?.length || 0);
+      console.log("Productos cargados:", data?.length || 0);
 
       const formattedProducts = (data || [])
         .map(formatProductFromSupabase)
         .filter((product) => product !== null && product.isActive);
 
-      console.log("✅ Productos formateados:", formattedProducts.length);
-      setProducts(formattedProducts);
+      console.log("Productos formateados:", formattedProducts.length);
+      setAllProducts(formattedProducts);
       return formattedProducts;
     } catch (error) {
       console.error("Error en loadAllProducts:", error);
       setError(error.message);
-      setProducts([]);
+      setAllProducts([]);
       return [];
     } finally {
-      setLoading(false);
+      setLoadingAll(false);
     }
   }, []);
 
-  // ACTUALIZACIÓN DE PRODUCTO MEJORADA
+  const loadProviderProducts = useCallback(async (providerId) => {
+    if (!providerId) {
+      setProviderProducts([]);
+      return [];
+    }
+
+    try {
+      setLoadingProvider(true);
+      setError(null);
+
+      console.log(`Cargando productos para proveedor: ${providerId}`);
+
+      const { data, error: supabaseError } = await supabase
+        .from("products")
+        .select(`
+          *,
+          provider:users(id, name, email),
+          category:categories(id, name, description)
+        `)
+        .eq("provider_id", providerId)
+        .eq("is_active", true)
+        .order("created_at", { ascending: false });
+
+      if (supabaseError) throw supabaseError;
+
+      console.log("Productos del proveedor:", data?.length || 0);
+
+      const formattedProducts = (data || [])
+        .map(formatProductFromSupabase)
+        .filter((product) => product !== null && product.isActive);
+
+      console.log("Productos del proveedor formateados:", formattedProducts.length);
+      setProviderProducts(formattedProducts);
+      return formattedProducts;
+    } catch (error) {
+      console.error("Error en loadProviderProducts:", error);
+      setError(error.message);
+      setProviderProducts([]);
+      return [];
+    } finally {
+      setLoadingProvider(false);
+    }
+  }, []);
+
   const updateProduct = async (updatedProduct) => {
     try {
       setError(null);
-      console.log("🔄 INICIANDO ACTUALIZACIÓN DE PRODUCTO");
+      console.log("INICIANDO ACTUALIZACIÓN DE PRODUCTO");
 
       const { id, ...updates } = updatedProduct;
 
-      // Buscar producto actual
-      const currentProduct = products.find((p) => p.id === id);
+      const currentProduct = (user?.role === "provider" ? providerProducts : allProducts).find((p) => p.id === id);
       if (!currentProduct) {
         throw new Error("Producto no encontrado");
       }
 
-      console.log("📋 Datos recibidos para actualizar:", {
+      console.log("Datos recibidos para actualizar:", {
         id,
         updates,
         currentImages: currentProduct.images?.length || 0,
         newImages: updates.images?.length || 0
       });
 
-      // PROCESAR IMÁGENES
       let finalImages = currentProduct.images || [];
-      
+
       if (updates.images && updates.images.length > 0) {
-        console.log("🖼️ Procesando imágenes...");
+        console.log("Procesando imágenes...");
         finalImages = await processImagesForUpdate(
-          updates.images, 
-          id, 
+          updates.images,
+          id,
           currentProduct.images || []
         );
       }
 
-      // Preparar datos combinados
       const combinedProduct = {
         ...currentProduct,
         ...updates,
@@ -277,27 +320,24 @@ export const ProductProvider = ({ children }) => {
         providerId: currentProduct.provider_id || currentProduct.providerId,
       };
 
-      console.log("📦 Producto combinado para actualizar:", {
+      console.log("Producto combinado para actualizar:", {
         name: combinedProduct.name,
         imagesCount: combinedProduct.images?.length,
         category: combinedProduct.category,
         categoryId: combinedProduct.categoryId
       });
 
-      // Formatear para Supabase
       const productForSupabase = await formatProductToSupabase(combinedProduct);
-      
-      // Asegurar que images sea un array
+
       if (productForSupabase.images && !Array.isArray(productForSupabase.images)) {
         productForSupabase.images = [productForSupabase.images];
       }
 
-      console.log("📤 Enviando a Supabase:", {
+      console.log("Enviando a Supabase:", {
         ...productForSupabase,
         imagesCount: productForSupabase.images?.length
       });
 
-      // Actualizar en Supabase
       const { data, error: updateError } = await supabase
         .from("products")
         .update(productForSupabase)
@@ -310,7 +350,7 @@ export const ProductProvider = ({ children }) => {
         .single();
 
       if (updateError) {
-        console.error("❌ Error de Supabase:", updateError);
+        console.error("Error de Supabase:", updateError);
         throw updateError;
       }
 
@@ -318,20 +358,24 @@ export const ProductProvider = ({ children }) => {
         throw new Error("No se recibió respuesta del servidor");
       }
 
-      // Formatear respuesta
       const formattedProduct = formatProductFromSupabase(data);
-      
-      console.log("✅ Producto actualizado exitosamente:", {
+
+      console.log("Producto actualizado exitosamente:", {
         id: formattedProduct.id,
         name: formattedProduct.name,
         images: formattedProduct.images?.length || 0,
         category: formattedProduct.category
       });
 
-      // Actualizar estado local
-      setProducts((prev) =>
-        prev.map((product) => (product.id === id ? formattedProduct : product)),
-      );
+      if (user?.role === "provider") {
+        setProviderProducts((prev) =>
+          prev.map((p) => (p.id === id ? formattedProduct : p))
+        );
+      } else {
+        setAllProducts((prev) =>
+          prev.map((p) => (p.id === id ? formattedProduct : p))
+        );
+      }
 
       return {
         success: true,
@@ -339,7 +383,7 @@ export const ProductProvider = ({ children }) => {
         message: "Producto actualizado correctamente",
       };
     } catch (error) {
-      console.error("❌ Error completo en updateProduct:", error);
+      console.error("Error completo en updateProduct:", error);
       setError(error.message);
       return {
         success: false,
@@ -348,7 +392,6 @@ export const ProductProvider = ({ children }) => {
     }
   };
 
-  // AGREGAR PRODUCTO (actualizado para manejar imágenes)
   const addProduct = async (productData) => {
     try {
       setError(null);
@@ -364,18 +407,15 @@ export const ProductProvider = ({ children }) => {
         isActive: true,
       };
 
-      console.log("➕ Creando nuevo producto:", finalProductData);
+      console.log("Creando nuevo producto:", finalProductData);
 
-      // Procesar imágenes para el nuevo producto
       let imageUrls = [];
       if (finalProductData.images && finalProductData.images.length > 0) {
-        console.log("🖼️ Subiendo imágenes del nuevo producto...");
-        // Primero creamos el producto para obtener ID, luego subimos imágenes
+        console.log("Subiendo imágenes del nuevo producto...");
+
         const productForSupabase = await formatProductToSupabase(finalProductData);
-        
-        // Crear producto sin imágenes primero
         const productWithoutImages = { ...productForSupabase, images: null };
-        
+
         const { data: newProduct, error: createError } = await supabase
           .from("products")
           .insert([productWithoutImages])
@@ -384,7 +424,6 @@ export const ProductProvider = ({ children }) => {
 
         if (createError) throw createError;
 
-        // Ahora subir imágenes con el ID del producto
         for (let i = 0; i < finalProductData.images.length; i++) {
           const imageUri = finalProductData.images[i];
           if (imageUri.startsWith('file://') || imageUri.startsWith('content://')) {
@@ -395,7 +434,6 @@ export const ProductProvider = ({ children }) => {
           }
         }
 
-        // Actualizar producto con las URLs de las imágenes
         const { data: updatedProduct, error: updateError } = await supabase
           .from("products")
           .update({ images: imageUrls })
@@ -410,7 +448,10 @@ export const ProductProvider = ({ children }) => {
         if (updateError) throw updateError;
 
         const formattedProduct = formatProductFromSupabase(updatedProduct);
-        setProducts((prev) => [formattedProduct, ...prev]);
+
+        if (user?.role === "provider") {
+          setProviderProducts((prev) => [formattedProduct, ...prev]);
+        }
 
         return {
           success: true,
@@ -418,9 +459,8 @@ export const ProductProvider = ({ children }) => {
           message: "Producto creado exitosamente",
         };
       } else {
-        // Crear producto sin imágenes
         const productForSupabase = await formatProductToSupabase(finalProductData);
-        
+
         const { data, error } = await supabase
           .from("products")
           .insert([productForSupabase])
@@ -434,7 +474,10 @@ export const ProductProvider = ({ children }) => {
         if (error) throw error;
 
         const newProduct = formatProductFromSupabase(data);
-        setProducts((prev) => [newProduct, ...prev]);
+
+        if (user?.role === "provider") {
+          setProviderProducts((prev) => [newProduct, ...prev]);
+        }
 
         return {
           success: true,
@@ -443,7 +486,7 @@ export const ProductProvider = ({ children }) => {
         };
       }
     } catch (error) {
-      console.error("❌ Error en addProduct:", error);
+      console.error("Error en addProduct:", error);
       setError(error.message);
       return {
         success: false,
@@ -453,56 +496,11 @@ export const ProductProvider = ({ children }) => {
     }
   };
 
-  // Resto de las funciones permanecen igual...
-  const loadProviderProducts = useCallback(async (providerId) => {
-    if (!providerId) {
-      setProducts([]);
-      return [];
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      console.log(`🏢 Cargando productos para proveedor: ${providerId}`);
-
-      const { data, error: supabaseError } = await supabase
-        .from("products")
-        .select(`
-          *,
-          provider:users(id, name, email),
-          category:categories(id, name, description)
-        `)
-        .eq("provider_id", providerId)
-        .eq("is_active", true)
-        .order("created_at", { ascending: false });
-
-      if (supabaseError) throw supabaseError;
-
-      console.log("📊 Productos del proveedor:", data?.length || 0);
-
-      const formattedProducts = (data || [])
-        .map(formatProductFromSupabase)
-        .filter((product) => product !== null && product.isActive);
-
-      console.log("✅ Productos del proveedor formateados:", formattedProducts.length);
-      setProducts(formattedProducts);
-      return formattedProducts;
-    } catch (error) {
-      console.error("Error en loadProviderProducts:", error);
-      setError(error.message);
-      setProducts([]);
-      return [];
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   const deleteProduct = async (productId) => {
     try {
       setError(null);
 
-      console.log(`🗑️ Eliminando producto ID: ${productId}`);
+      console.log(`Eliminando producto ID: ${productId}`);
 
       const { error } = await supabase
         .from("products")
@@ -511,9 +509,11 @@ export const ProductProvider = ({ children }) => {
 
       if (error) throw error;
 
-      setProducts((prev) => prev.filter((product) => product.id !== productId));
+      if (user?.role === "provider") {
+        setProviderProducts((prev) => prev.filter((p) => p.id !== productId));
+      }
 
-      console.log(`✅ Producto ${productId} eliminado correctamente`);
+      console.log(`Producto ${productId} eliminado correctamente`);
 
       return {
         success: true,
@@ -538,26 +538,26 @@ export const ProductProvider = ({ children }) => {
   };
 
   const getMyProducts = () => {
-    if (!user?.id) return [];
-    return products.filter(
-      (p) => p.provider_id === user.id || p.providerId === user.id,
-    );
+    if (user?.role !== "provider" || !user?.id) return [];
+    return providerProducts;
   };
 
   const getProductById = (productId) => {
-    const product = products.find((p) => p.id === productId);
-    return product || null;
+    if (user?.role === "provider") {
+      return providerProducts.find((p) => p.id === productId) || null;
+    }
+    return allProducts.find((p) => p.id === productId) || null;
   };
 
   const getProductsByProvider = (providerId) => {
-    return products.filter(
-      (p) => p.provider_id === providerId || p.providerId === providerId,
+    return providerProducts.filter(
+      (p) => p.provider_id === providerId || p.providerId === providerId
     );
   };
 
   const updateProductStock = async (productId, newStock) => {
     try {
-      const product = products.find((p) => p.id === productId);
+      const product = getProductById(productId);
       if (!product) {
         throw new Error("Producto no encontrado");
       }
@@ -571,7 +571,7 @@ export const ProductProvider = ({ children }) => {
 
       if (result.success) {
         console.log(
-          `📊 Stock actualizado para producto ${productId}: ${product.stock} -> ${newStock}`,
+          `Stock actualizado para producto ${productId}: ${product.stock} -> ${newStock}`
         );
       }
 
@@ -586,49 +586,55 @@ export const ProductProvider = ({ children }) => {
   };
 
   const searchProducts = (query) => {
-    if (!query.trim()) return products;
+    if (!query.trim()) {
+      return user?.role === "provider" ? providerProducts : allProducts;
+    }
 
     const searchTerm = query.toLowerCase();
-    return products.filter(
+    const list = user?.role === "provider" ? providerProducts : allProducts;
+
+    return list.filter(
       (product) =>
         product.name.toLowerCase().includes(searchTerm) ||
         product.description.toLowerCase().includes(searchTerm) ||
-        product.category.toLowerCase().includes(searchTerm),
+        product.category.toLowerCase().includes(searchTerm)
     );
   };
 
   const filterProductsByCategory = (category) => {
-    if (!category || category === "all") return products;
-    return products.filter(
+    if (!category || category === "all") {
+      return user?.role === "provider" ? providerProducts : allProducts;
+    }
+
+    const list = user?.role === "provider" ? providerProducts : allProducts;
+
+    return list.filter(
       (product) =>
-        product.category === category || product.categoryId === category,
+        product.category === category || product.categoryId === category
     );
   };
 
   const value = {
-    products,
-    loading,
-    error,
-    myProducts: getMyProducts(),
+    products: allProducts,
+    loading: loadingAll,
 
-    // CRUD Operations
+    myProducts: getMyProducts(),
+    providerLoading: loadingProvider,
+
     addProduct,
     deleteProduct,
     updateProduct,
     refreshProducts,
 
-    // Loading Functions
     loadAllProducts,
     loadProviderProducts,
 
-    // Utility Functions
     getProductById,
     getProductsByProvider,
     updateProductStock,
     searchProducts,
     filterProductsByCategory,
 
-    // User Info
     userRole: user?.role,
     isProvider: user?.role === "provider",
     currentUserId: user?.id,

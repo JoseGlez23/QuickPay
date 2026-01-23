@@ -12,6 +12,33 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [cart, setCart] = useState([]);
 
+  useEffect(() => {
+    const loadCart = async () => {
+      try {
+        const storedCart = await AsyncStorage.getItem("cart");
+        if (storedCart) {
+          setCart(JSON.parse(storedCart));
+        }
+      } catch (error) {
+        console.error("Error cargando carrito desde AsyncStorage:", error);
+      }
+    };
+    loadCart();
+  }, []);
+
+  useEffect(() => {
+    const saveCart = async () => {
+      try {
+        await AsyncStorage.setItem("cart", JSON.stringify(cart));
+      } catch (error) {
+        console.error("Error guardando carrito en AsyncStorage:", error);
+      }
+    };
+    if (cart.length > 0) {
+      saveCart();
+    }
+  }, [cart]);
+
   const fetchUserProfile = async (authUserId) => {
     try {
       if (!authUserId) {
@@ -147,7 +174,6 @@ export const AuthProvider = ({ children }) => {
         await fetchUserProfile(newSession.user.id);
       } else {
         setUser(null);
-        setCart([]);
       }
       setLoading(false);
     });
@@ -350,76 +376,67 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     try {
       setLoading(true);
-      console.log("🔄 Iniciando proceso de logout...");
+      console.log("Iniciando proceso de logout...");
 
       try {
         const { data: sessionCheck, error: sessionError } =
           await supabase.auth.getSession();
 
         if (sessionError) {
-          console.warn("⚠️ Error verificando sesión:", sessionError.message);
+          console.warn("Error verificando sesión:", sessionError.message);
         } else if (!sessionCheck.session) {
           console.log(
-            "ℹ️ No hay sesión activa en Supabase, limpiando datos locales...",
+            "No hay sesión activa en Supabase, limpiando datos locales...",
           );
         } else {
-          console.log("✅ Sesión activa encontrada, procediendo a cerrarla...");
+          console.log("Sesión activa encontrada, procediendo a cerrarla...");
 
           const { error: signOutError } = await supabase.auth.signOut();
 
           if (signOutError) {
             console.warn(
-              "⚠️ Advertencia al cerrar sesión en Supabase:",
+              "Advertencia al cerrar sesión en Supabase:",
               signOutError.message,
             );
-            console.log("ℹ️ Continuando con limpieza local...");
+            console.log("Continuando con limpieza local...");
           } else {
-            console.log("✅ Sesión cerrada exitosamente en Supabase");
+            console.log("Sesión cerrada exitosamente en Supabase");
           }
         }
       } catch (authError) {
         console.warn(
-          "⚠️ Error en verificación de sesión (continuando):",
+          "Error en verificación de sesión (continuando):",
           authError.message,
         );
       }
 
-      console.log("🧹 Limpiando estado local...");
+      console.log("Limpiando estado local...");
       setUser(null);
       setSession(null);
-      setCart([]);
 
       try {
         await AsyncStorage.removeItem("user");
-        console.log("✅ AsyncStorage limpiado correctamente");
+        console.log("AsyncStorage limpiado correctamente");
       } catch (storageError) {
-        console.warn("⚠️ Error limpiando AsyncStorage:", storageError.message);
+        console.warn("Error limpiando AsyncStorage:", storageError.message);
       }
 
-      try {
-        await supabase.auth.setSession(null);
-        console.log("✅ Cliente de Supabase reseteado");
-      } catch (resetError) {
-        console.warn("⚠️ Error en reset de Supabase:", resetError.message);
-      }
-
-      console.log("🎉 Logout completado exitosamente");
+      console.log("Logout completado exitosamente");
       return {
         success: true,
         message: "Sesión cerrada correctamente",
       };
     } catch (error) {
-      console.error("❌ Error crítico en logout:", error);
+      console.error("Error crítico en logout:", error);
 
-      console.log("🧹 Limpiando datos locales después de error...");
+      console.log("Limpiando datos locales después de error...");
       setUser(null);
       setSession(null);
-      setCart([]);
 
       try {
         await AsyncStorage.removeItem("user");
       } catch (storageError) {
-        console.warn("⚠️ Error secundario limpiando storage:", storageError);
+        console.warn("Error secundario limpiando storage:", storageError);
       }
 
       return {
@@ -477,21 +494,19 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // NUEVA FUNCIÓN MODIFICADA: addToCart
   const addToCart = (product, quantity = 1) => {
     try {
-      console.log("🛍️ Agregando producto al carrito:", {
+      console.log("Agregando producto al carrito:", {
         id: product.id,
         name: product.name,
         provider_id: product.provider_id,
         providerId: product.providerId,
       });
 
-      // Validar que el producto tenga provider_id
       const providerId = product.provider_id || product.providerId;
 
       if (!providerId) {
-        console.error("❌ Producto sin provider_id:", product);
+        console.error("Producto sin provider_id:", product);
         Alert.alert(
           "Error",
           "No se pudo identificar el proveedor del producto. Intenta nuevamente.",
@@ -513,7 +528,6 @@ export const AuthProvider = ({ children }) => {
           );
         }
 
-        // Crear el nuevo item del carrito CON provider_id
         const cartItem = {
           id: product.id,
           name: product.name,
@@ -525,7 +539,7 @@ export const AuthProvider = ({ children }) => {
           images: product.images || (product.image ? [product.image] : []),
           stock: product.stock || 0,
           quantity: quantity,
-          provider_id: providerId, // <-- AQUÍ SE GUARDA EL PROVIDER_ID
+          provider_id: providerId,
           provider_name:
             product.provider_name || product.provider?.name || "Proveedor",
           created_at: product.created_at,
@@ -533,7 +547,7 @@ export const AuthProvider = ({ children }) => {
         };
 
         console.log(
-          "✅ Producto agregado al carrito con provider_id:",
+          "Producto agregado al carrito con provider_id:",
           cartItem.provider_id,
         );
         return [...prev, cartItem];

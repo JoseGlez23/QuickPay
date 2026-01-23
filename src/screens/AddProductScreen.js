@@ -134,7 +134,7 @@ export default function AddProductScreen({ navigation }) {
     
     for (const imageUri of images) {
       try {
-        console.log(`📤 Subiendo imagen: ${imageUri.substring(0, 50)}...`);
+        console.log(` Subiendo imagen: ${imageUri.substring(0, 50)}...`);
         
         // Convertir imagen a base64
         const base64 = await FileSystem.readAsStringAsync(imageUri, { 
@@ -162,7 +162,7 @@ export default function AddProductScreen({ navigation }) {
           .getPublicUrl(fileName);
         
         uploadedUrls.push(urlData.publicUrl);
-        console.log(`✅ Imagen subida: ${urlData.publicUrl}`);
+        console.log(` Imagen subida: ${urlData.publicUrl}`);
       } catch (error) {
         console.error("Error procesando imagen:", error);
         throw error;
@@ -198,7 +198,7 @@ export default function AddProductScreen({ navigation }) {
     setIsSubmitting(true);
     
     try {
-      console.log("📝 Creando producto...", {
+      console.log(" Creando producto...", {
         name,
         price: parseFloat(price),
         categoryId,
@@ -227,11 +227,11 @@ export default function AddProductScreen({ navigation }) {
       }
       
       const productId = result.product.id;
-      console.log(`✅ Producto creado con ID: ${productId}`);
+      console.log(` Producto creado con ID: ${productId}`);
       
       // Si hay imágenes, subirlas y actualizar producto
       if (images.length > 0) {
-        console.log("🖼️ Subiendo imágenes...");
+        console.log(" Subiendo imágenes...");
         const imageUrls = await uploadImages(productId);
         
         // Actualizar producto con URLs de imágenes
@@ -244,7 +244,7 @@ export default function AddProductScreen({ navigation }) {
           throw updateResult.error;
         }
         
-        console.log(`✅ ${imageUrls.length} imágenes subidas`);
+        console.log(` ${imageUrls.length} imágenes subidas`);
       }
       
       // Refrescar lista de productos
@@ -252,13 +252,13 @@ export default function AddProductScreen({ navigation }) {
       
       // Mostrar éxito y regresar
       Alert.alert(
-        "✅ Éxito",
+        " Éxito",
         "Producto creado correctamente",
         [{ text: "OK", onPress: () => navigation.goBack() }]
       );
       
     } catch (error) {
-      console.error("❌ Error creando producto:", error);
+      console.error(" Error creando producto:", error);
       showAlert("Error", error.message || "Error al guardar el producto", "error");
     } finally {
       setIsSubmitting(false);
@@ -282,14 +282,7 @@ export default function AddProductScreen({ navigation }) {
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
           
-          <View style={styles.header}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-              <Icon name="arrow-left" size={24} color={colors.text} />
-            </TouchableOpacity>
-            <Text style={[styles.mainTitle, { color: colors.text }]}>Nuevo Producto</Text>
-            <View style={{ width: 40 }} />
-          </View>
-
+         
           {/* SECCIÓN IMÁGENES */}
           <View style={styles.mediaContainer}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Imágenes del Producto</Text>

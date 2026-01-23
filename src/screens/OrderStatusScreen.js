@@ -15,9 +15,11 @@ import {
   Modal,
   TextInput,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import Icon from "react-native-vector-icons/MaterialIcons";
 import { useTheme } from "../context/ThemeContext";
+import { useOrders } from "../context/OrderContext";
 import { supabase } from "../utils/supabase";
 
 const { width, height } = Dimensions.get("window");
@@ -75,13 +77,12 @@ const statusConfig = {
 
 export default function OrderStatusScreen({ route, navigation }) {
   const { colors, isDarkMode } = useTheme();
-  const { orderId } = route.params || { orderId: "ORD-001" };
+  const { orderId } = route.params || {};
+  const { getOrderById } = useOrders();
 
   const [orderDetails, setOrderDetails] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [showHelpModal, setShowHelpModal] = useState(false);
-  const [helpMessage, setHelpMessage] = useState("");
 
   const scrollY = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -96,7 +97,6 @@ export default function OrderStatusScreen({ route, navigation }) {
   }, [orderId]);
 
   useEffect(() => {
-    // Animación de entrada
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -132,102 +132,203 @@ export default function OrderStatusScreen({ route, navigation }) {
   const loadOrderDetails = async () => {
     try {
       setLoading(true);
-      // Aquí puedes conectar con tu API real
-      // Por ahora uso datos de ejemplo
-      await new Promise((resolve) => setTimeout(resolve, 500)); // Simular carga
 
-      const mockOrder = {
-        id: orderId,
-        orderNumber: `ORD-${orderId.slice(-6).toUpperCase()}`,
-        date: new Date().toISOString(),
-        total: 1299.99,
-        status: "delivered",
-        items: [
-          {
-            id: "1",
-            name: "iPhone 15 Pro Max 256GB",
-            price: 1299.99,
-            quantity: 1,
-            image:
-              "https://images.unsplash.com/photo-1696446701796-da61225697cc?q=80&w=400",
-          },
-          {
-            id: "2",
-            name: "Apple AirPods Pro",
-            price: 249.99,
-            quantity: 1,
-            image:
-              "https://images.unsplash.com/photo-1600294037681-c80b4cb5b434?q=80&w=400",
-          },
-        ],
+      if (!orderId) {
+        throw new Error("No se proporcionó ID de pedido");
+      }
+
+      console.log("Cargando detalles del pedido:", orderId);
+
+      const result = await getOrderById(orderId);
+
+      if (!result.success) {
+        throw new Error(result.error || "Error al cargar el pedido");
+      }
+
+      console.log("Pedido cargado:", result.order);
+
+      const order = result.order;
+      const timeline = generateTimeline(order);
+
+      const processedOrder = {
+        ...order,
+        orderNumber:
+          order.orderNumber ||
+          order.order_number ||
+          `ORD-${order.id?.slice(-8).toUpperCase()}`,
+        date: order.created_at || order.createdAt,
+        total: parseFloat(order.total) || 0,
+        status: order.status || "pending",
+        items: (order.items || []).map((item) => ({
+          id: item.id || item.product_id,
+          name: item.product?.name || "Producto sin nombre",
+          price: parseFloat(item.unit_price || item.product?.price || 0),
+          quantity: item.quantity || 1,
+          image: item.product?.images?.[0] || null,
+          product: item.product,
+        })),
         shipping: {
-          address:
-            "Av. Principal 123, Col. Centro, Ciudad de México, CDMX 06000",
-          method: "Express Delivery",
-          trackingNumber: "TRK-789456123XYZ",
-          estimatedDelivery: "17 Nov 2023",
-          actualDelivery: "17 Nov 2023, 03:30 PM",
-          carrier: "DHL Express",
-          phone: "+52 55 1234 5678",
+          address: order.shipping_address || "Dirección no especificada",
+          method: order.payment_method || "Método no especificado",
+          trackingNumber: order.stripe_payment_id || "N/A",
+          estimatedDelivery: calculateEstimatedDelivery(order.created_at),
+          actualDelivery:
+            order.status === "delivered"
+              ? formatDateForDisplay(order.updated_at)
+              : "No entregado aún",
+          carrier: "Transportista no especificado",
+          phone:
+            order.client?.phone ||
+            order.notes?.match(/Teléfono: (\d+)/)?.[1] ||
+            "Sin teléfono",
         },
         payment: {
-          method: "Tarjeta de crédito Visa",
-          lastFour: "1234",
-          status: "Pagado",
-          transactionId: "TXN-456789123",
-          amount: 1299.99,
-          date: new Date().toISOString(),
+          method: order.payment_method || "No especificado",
+          lastFour: "****",
+          status: order.payment_status === "paid" ? "Pagado" : "Pendiente",
+          transactionId:
+            order.stripe_payment_id || order.id?.slice(-12).toUpperCase(),
+          amount: parseFloat(order.total) || 0,
+          date: order.created_at || new Date().toISOString(),
         },
-        provider: {
-          name: "Apple Store Oficial",
-          phone: "+52 800 123 4567",
-          email: "support@apple.com",
+        provider: order.provider || {
+          name: "Proveedor no disponible",
+          phone: "Sin teléfono",
+          email: "Sin email",
         },
-        timeline: [
-          {
-            status: "ordered",
-            label: "Pedido realizado",
-            date: "15 Nov 2023, 10:30 AM",
-            completed: true,
-            icon: "shopping-bag",
-          },
-          {
-            status: "paid",
-            label: "Pago confirmado",
-            date: "15 Nov 2023, 10:35 AM",
-            completed: true,
-            icon: "payment",
-          },
-          {
-            status: "processing",
-            label: "Preparando pedido",
-            date: "15 Nov 2023, 11:00 AM",
-            completed: true,
-            icon: "build",
-          },
-          {
-            status: "shipped",
-            label: "Enviado",
-            date: "16 Nov 2023, 09:00 AM",
-            completed: true,
-            icon: "local-shipping",
-          },
-          {
-            status: "delivered",
-            label: "Entregado",
-            date: "17 Nov 2023, 03:30 PM",
-            completed: true,
-            icon: "check-circle",
-          },
-        ],
+        client: order.client,
+        timeline: timeline,
+        notes: order.notes,
+        cancelable_until: order.cancelable_until,
+        cancellation_reason: order.cancellation_reason,
       };
 
-      setOrderDetails(mockOrder);
+      setOrderDetails(processedOrder);
     } catch (error) {
       console.error("Error loading order details:", error);
+      Alert.alert(
+        "Error",
+        error.message || "No se pudieron cargar los detalles del pedido",
+      );
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const generateTimeline = (order) => {
+    const timeline = [];
+    const createdAt = new Date(order.created_at);
+
+    timeline.push({
+      status: "ordered",
+      label: "Pedido realizado",
+      date: formatDateForDisplay(order.created_at),
+      completed: true,
+      icon: "shopping-bag",
+    });
+
+    if (order.payment_status === "paid") {
+      timeline.push({
+        status: "paid",
+        label: "Pago confirmado",
+        date: formatDateForDisplay(order.updated_at || order.created_at),
+        completed: true,
+        icon: "payment",
+      });
+    } else {
+      timeline.push({
+        status: "paid",
+        label: "Pago pendiente",
+        date: "En espera",
+        completed: false,
+        icon: "payment",
+      });
+    }
+
+    if (["processing", "shipped", "delivered"].includes(order.status)) {
+      timeline.push({
+        status: "processing",
+        label: "Preparando pedido",
+        date: formatDateForDisplay(order.updated_at),
+        completed: true,
+        icon: "build",
+      });
+    } else {
+      timeline.push({
+        status: "processing",
+        label: "Preparando pedido",
+        date: "Próximamente",
+        completed: false,
+        icon: "build",
+      });
+    }
+
+    if (["shipped", "delivered"].includes(order.status)) {
+      timeline.push({
+        status: "shipped",
+        label: "Enviado",
+        date: formatDateForDisplay(order.updated_at),
+        completed: true,
+        icon: "local-shipping",
+      });
+    } else {
+      timeline.push({
+        status: "shipped",
+        label: "Envío",
+        date: "Próximamente",
+        completed: false,
+        icon: "local-shipping",
+      });
+    }
+
+    if (order.status === "delivered") {
+      timeline.push({
+        status: "delivered",
+        label: "Entregado",
+        date: formatDateForDisplay(order.updated_at),
+        completed: true,
+        icon: "check-circle",
+      });
+    } else {
+      timeline.push({
+        status: "delivered",
+        label: "Entrega",
+        date: "Próximamente",
+        completed: false,
+        icon: "check-circle",
+      });
+    }
+
+    return timeline;
+  };
+
+  const calculateEstimatedDelivery = (createdAt) => {
+    if (!createdAt) return "Fecha estimada no disponible";
+
+    const createdDate = new Date(createdAt);
+    const estimatedDate = new Date(createdDate);
+    estimatedDate.setDate(estimatedDate.getDate() + 3);
+
+    return estimatedDate.toLocaleDateString("es-ES", {
+      day: "numeric",
+      month: "long",
+    });
+  };
+
+  const formatDateForDisplay = (dateString) => {
+    if (!dateString) return "Fecha no disponible";
+
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString("es-ES", {
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch (error) {
+      return "Fecha inválida";
     }
   };
 
@@ -236,66 +337,80 @@ export default function OrderStatusScreen({ route, navigation }) {
     await loadOrderDetails();
   };
 
-  const handleHelpRequest = () => {
-    setShowHelpModal(true);
-  };
-
-  const submitHelpRequest = async () => {
-    // Aquí puedes enviar la solicitud de ayuda
-    console.log("Help request:", helpMessage);
-    setShowHelpModal(false);
-    setHelpMessage("");
-
-    // Mostrar confirmación
-    // Alert.alert('Solicitud enviada', 'Nos pondremos en contacto contigo pronto.');
-  };
-
   const formatDate = (dateString) => {
     if (!dateString) return "Fecha no disponible";
 
-    const date = new Date(dateString);
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
+    try {
+      const date = new Date(dateString);
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
 
-    if (date.toDateString() === today.toDateString()) {
-      return (
-        "Hoy " +
-        date.toLocaleTimeString("es-ES", {
+      if (date.toDateString() === today.toDateString()) {
+        return (
+          "Hoy " +
+          date.toLocaleTimeString("es-ES", {
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        );
+      } else if (date.toDateString() === yesterday.toDateString()) {
+        return (
+          "Ayer " +
+          date.toLocaleTimeString("es-ES", {
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        );
+      } else {
+        return date.toLocaleDateString("es-ES", {
+          day: "2-digit",
+          month: "short",
           hour: "2-digit",
           minute: "2-digit",
-        })
-      );
-    } else if (date.toDateString() === yesterday.toDateString()) {
-      return (
-        "Ayer " +
-        date.toLocaleTimeString("es-ES", {
-          hour: "2-digit",
-          minute: "2-digit",
-        })
-      );
-    } else {
-      return date.toLocaleDateString("es-ES", {
-        day: "2-digit",
-        month: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
+        });
+      }
+    } catch (error) {
+      return "Fecha inválida";
     }
   };
 
   const formatCurrency = (amount) => {
+    const numAmount = parseFloat(amount) || 0;
     return new Intl.NumberFormat("es-MX", {
       style: "currency",
       currency: "MXN",
       minimumFractionDigits: 2,
-    }).format(amount);
+    }).format(numAmount);
   };
 
   const getStatusColor = (status) => {
     return statusConfig[status]?.color || "#6B7280";
   };
 
+  const navigateToHome = () => {
+    navigation.navigate("ClientHome");
+  };
+
+  const headerHeight = scrollY.interpolate({
+    inputRange: [0, 100],
+    outputRange: [240, 140],
+    extrapolate: "clamp",
+  });
+
+  const headerOpacity = scrollY.interpolate({
+    inputRange: [0, 50, 100],
+    outputRange: [1, 0.5, 0],
+    extrapolate: "clamp",
+  });
+
+  const titleOpacity = scrollY.interpolate({
+    inputRange: [0, 80, 100],
+    outputRange: [0, 0.5, 1],
+    extrapolate: "clamp",
+  });
+
+  // Función renderTimelineStep (esto faltaba en tu código)
   const renderTimelineStep = (step, index, totalSteps) => {
     const isLast = index === totalSteps - 1;
     const isActive = step.completed;
@@ -369,34 +484,6 @@ export default function OrderStatusScreen({ route, navigation }) {
     );
   };
 
-  const navigateToHome = () => {
-    navigation.navigate("ClientHome");
-  };
-
-  const copyToClipboard = (text) => {
-    // Aquí puedes implementar la funcionalidad de copiar
-    console.log("Copied:", text);
-    // Alert.alert('Copiado', 'Texto copiado al portapapeles');
-  };
-
-  const headerHeight = scrollY.interpolate({
-    inputRange: [0, 100],
-    outputRange: [240, 140],
-    extrapolate: "clamp",
-  });
-
-  const headerOpacity = scrollY.interpolate({
-    inputRange: [0, 50, 100],
-    outputRange: [1, 0.5, 0],
-    extrapolate: "clamp",
-  });
-
-  const titleOpacity = scrollY.interpolate({
-    inputRange: [0, 80, 100],
-    outputRange: [0, 0.5, 1],
-    extrapolate: "clamp",
-  });
-
   if (loading && !orderDetails) {
     return (
       <SafeAreaView
@@ -407,6 +494,27 @@ export default function OrderStatusScreen({ route, navigation }) {
           <Text style={[styles.loadingText, { color: colors.text }]}>
             Cargando detalles del pedido...
           </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!orderDetails) {
+    return (
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+      >
+        <View style={styles.errorContainer}>
+          <Icon name="error-outline" size={60} color={colors.textSecondary} />
+          <Text style={[styles.errorText, { color: colors.text }]}>
+            No se encontró el pedido
+          </Text>
+          <TouchableOpacity
+            style={[styles.backButton, { backgroundColor: colors.primary }]}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.backButtonText}>Volver atrás</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -425,7 +533,6 @@ export default function OrderStatusScreen({ route, navigation }) {
         translucent
       />
 
-      {/* Animated Header */}
       <Animated.View
         style={[
           styles.header,
@@ -439,31 +546,11 @@ export default function OrderStatusScreen({ route, navigation }) {
           style={[styles.headerContent, { opacity: headerOpacity }]}
         >
           <View style={styles.headerTop}>
-            <TouchableOpacity
-              style={[
-                styles.backButton,
-                { backgroundColor: "rgba(255,255,255,0.2)" },
-              ]}
-              onPress={() => navigation.goBack()}
-            >
-              <Icon name="arrow-back" size={24} color="#FFFFFF" />
-            </TouchableOpacity>
-
             <Animated.View style={{ opacity: titleOpacity }}>
               <Text style={styles.headerTitleSmall}>
                 Pedido #{orderDetails?.orderNumber}
               </Text>
             </Animated.View>
-
-            <TouchableOpacity
-              style={[
-                styles.helpButton,
-                { backgroundColor: "rgba(255,255,255,0.2)" },
-              ]}
-              onPress={handleHelpRequest}
-            >
-              <Icon name="help-outline" size={24} color="#FFFFFF" />
-            </TouchableOpacity>
           </View>
 
           <View style={styles.headerMain}>
@@ -484,104 +571,6 @@ export default function OrderStatusScreen({ route, navigation }) {
         </Animated.View>
       </Animated.View>
 
-      {/* Help Modal */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={showHelpModal}
-        onRequestClose={() => setShowHelpModal(false)}
-      >
-        <View
-          style={[styles.modalOverlay, { backgroundColor: "rgba(0,0,0,0.7)" }]}
-        >
-          <Animated.View
-            style={[
-              styles.modalContent,
-              {
-                backgroundColor: colors.card,
-                transform: [{ translateY: slideAnim }],
-              },
-            ]}
-          >
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>
-                ¿Necesitas ayuda con tu pedido?
-              </Text>
-              <TouchableOpacity onPress={() => setShowHelpModal(false)}>
-                <Icon name="close" size={24} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.modalBody}>
-              <Text style={[styles.modalText, { color: colors.textSecondary }]}>
-                Describe el problema o pregunta sobre tu pedido:
-              </Text>
-
-              <TextInput
-                style={[
-                  styles.helpInput,
-                  {
-                    backgroundColor: isDarkMode ? "#1F2937" : "#F9FAFB",
-                    color: colors.text,
-                    borderColor: colors.border,
-                  },
-                ]}
-                multiline
-                numberOfLines={4}
-                placeholder="Escribe aquí tu mensaje..."
-                placeholderTextColor={colors.textSecondary}
-                value={helpMessage}
-                onChangeText={setHelpMessage}
-              />
-
-              <Text
-                style={[styles.contactInfo, { color: colors.textSecondary }]}
-              >
-                O contacta al proveedor:
-              </Text>
-
-              <TouchableOpacity
-                style={[
-                  styles.contactButton,
-                  { backgroundColor: isDarkMode ? "#374151" : "#F3F4F6" },
-                ]}
-              >
-                <Icon name="phone" size={20} color={colors.primary} />
-                <Text
-                  style={[styles.contactButtonText, { color: colors.text }]}
-                >
-                  {orderDetails?.provider?.phone || "Sin número disponible"}
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.modalFooter}>
-              <TouchableOpacity
-                style={[
-                  styles.modalCancelButton,
-                  { backgroundColor: isDarkMode ? "#374151" : "#F3F4F6" },
-                ]}
-                onPress={() => setShowHelpModal(false)}
-              >
-                <Text style={[styles.modalCancelText, { color: colors.text }]}>
-                  Cancelar
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.modalSubmitButton,
-                  { backgroundColor: colors.primary },
-                ]}
-                onPress={submitHelpRequest}
-              >
-                <Text style={styles.modalSubmitText}>Enviar solicitud</Text>
-              </TouchableOpacity>
-            </View>
-          </Animated.View>
-        </View>
-      </Modal>
-
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
@@ -599,7 +588,6 @@ export default function OrderStatusScreen({ route, navigation }) {
           />
         }
       >
-        {/* Order Info Banner */}
         <Animated.View
           style={[
             styles.orderInfoBanner,
@@ -639,10 +627,10 @@ export default function OrderStatusScreen({ route, navigation }) {
               <Text
                 style={[styles.orderInfoLabel, { color: colors.textSecondary }]}
               >
-                Envío
+                Método
               </Text>
               <Text style={[styles.orderInfoValue, { color: colors.text }]}>
-                {orderDetails?.shipping?.method || "Standard"}
+                {orderDetails?.shipping?.method || "No especificado"}
               </Text>
             </View>
 
@@ -651,19 +639,18 @@ export default function OrderStatusScreen({ route, navigation }) {
               <Text
                 style={[styles.orderInfoLabel, { color: colors.textSecondary }]}
               >
-                Tienda
+                Proveedor
               </Text>
               <Text
                 style={[styles.orderInfoValue, { color: colors.text }]}
                 numberOfLines={1}
               >
-                {orderDetails?.provider?.name || "Tienda"}
+                {orderDetails?.provider?.name || "No disponible"}
               </Text>
             </View>
           </View>
         </Animated.View>
 
-        {/* Timeline Section */}
         <View
           style={[styles.timelineSection, { backgroundColor: colors.card }]}
         >
@@ -695,7 +682,6 @@ export default function OrderStatusScreen({ route, navigation }) {
           </View>
         </View>
 
-        {/* Products Section */}
         <View
           style={[styles.productsSection, { backgroundColor: colors.card }]}
         >
@@ -703,22 +689,42 @@ export default function OrderStatusScreen({ route, navigation }) {
             <Text style={[styles.sectionTitle, { color: colors.text }]}>
               Productos ({orderDetails?.items?.length || 0})
             </Text>
-            <TouchableOpacity>
-              <Text style={[styles.seeAllText, { color: colors.primary }]}>
-                Ver todos
-              </Text>
-            </TouchableOpacity>
+            <Text style={[styles.seeAllText, { color: colors.textSecondary }]}>
+              {orderDetails?.items?.length || 0} items
+            </Text>
           </View>
 
-          {orderDetails?.items?.map((item) => (
+          {orderDetails?.items?.map((item, index) => (
             <View
-              key={item.id}
+              key={item.id || index}
               style={[
                 styles.productCard,
                 { backgroundColor: isDarkMode ? "#1F2937" : "#F9FAFB" },
               ]}
             >
-              <Image source={{ uri: item.image }} style={styles.productImage} />
+              {item.image ? (
+                <Image
+                  source={{ uri: item.image }}
+                  style={styles.productImage}
+                />
+              ) : (
+                <View
+                  style={[
+                    styles.productImage,
+                    {
+                      backgroundColor: colors.border,
+                      justifyContent: "center",
+                      alignItems: "center",
+                    },
+                  ]}
+                >
+                  <Icon
+                    name="shopping-bag"
+                    size={30}
+                    color={colors.textSecondary}
+                  />
+                </View>
+              )}
               <View style={styles.productInfo}>
                 <Text
                   style={[styles.productName, { color: colors.text }]}
@@ -748,9 +754,7 @@ export default function OrderStatusScreen({ route, navigation }) {
           ))}
         </View>
 
-        {/* Shipping & Payment Details */}
         <View style={styles.detailsSection}>
-          {/* Shipping Details */}
           <Animated.View
             style={[
               styles.detailCard,
@@ -780,10 +784,10 @@ export default function OrderStatusScreen({ route, navigation }) {
                       { color: colors.textSecondary },
                     ]}
                   >
-                    Método
+                    Teléfono
                   </Text>
                   <Text style={[styles.detailValue, { color: colors.text }]}>
-                    {orderDetails?.shipping?.method}
+                    {orderDetails?.shipping?.phone}
                   </Text>
                 </View>
 
@@ -794,54 +798,63 @@ export default function OrderStatusScreen({ route, navigation }) {
                       { color: colors.textSecondary },
                     ]}
                   >
-                    Transportista
+                    Entrega estimada
                   </Text>
                   <Text style={[styles.detailValue, { color: colors.text }]}>
-                    {orderDetails?.shipping?.carrier}
+                    {orderDetails?.shipping?.estimatedDelivery}
                   </Text>
                 </View>
               </View>
 
-              <TouchableOpacity
-                style={[
-                  styles.copyButton,
-                  { backgroundColor: isDarkMode ? "#374151" : "#F3F4F6" },
-                ]}
-                onPress={() =>
-                  copyToClipboard(orderDetails?.shipping?.trackingNumber)
-                }
-              >
-                <Icon
-                  name="content-copy"
-                  size={16}
-                  color={colors.textSecondary}
-                />
-                <Text
-                  style={[styles.copyText, { color: colors.textSecondary }]}
-                >
-                  {orderDetails?.shipping?.trackingNumber}
-                </Text>
-                <Text
-                  style={[styles.copyLabel, { color: colors.textSecondary }]}
-                >
-                  (Copiar)
-                </Text>
-              </TouchableOpacity>
+              {orderDetails?.shipping?.trackingNumber &&
+                orderDetails.shipping.trackingNumber !== "N/A" && (
+                  <TouchableOpacity
+                    style={[
+                      styles.copyButton,
+                      { backgroundColor: isDarkMode ? "#374151" : "#F3F4F6" },
+                    ]}
+                    onPress={() =>
+                      copyToClipboard(orderDetails.shipping.trackingNumber)
+                    }
+                  >
+                    <Icon
+                      name="content-copy"
+                      size={16}
+                      color={colors.textSecondary}
+                    />
+                    <Text
+                      style={[styles.copyText, { color: colors.textSecondary }]}
+                    >
+                      {orderDetails.shipping.trackingNumber}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.copyLabel,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      (Copiar)
+                    </Text>
+                  </TouchableOpacity>
+                )}
 
-              <View style={styles.deliveryInfo}>
-                <Icon
-                  name="calendar-today"
-                  size={16}
-                  color={colors.textSecondary}
-                />
-                <Text style={[styles.deliveryInfoText, { color: colors.text }]}>
-                  Entregado: {orderDetails?.shipping?.actualDelivery}
-                </Text>
-              </View>
+              {orderDetails?.status === "delivered" && (
+                <View style={styles.deliveryInfo}>
+                  <Icon
+                    name="calendar-today"
+                    size={16}
+                    color={colors.textSecondary}
+                  />
+                  <Text
+                    style={[styles.deliveryInfoText, { color: colors.text }]}
+                  >
+                    Entregado: {orderDetails?.shipping?.actualDelivery}
+                  </Text>
+                </View>
+              )}
             </View>
           </Animated.View>
 
-          {/* Payment Details */}
           <Animated.View
             style={[
               styles.detailCard,
@@ -886,10 +899,29 @@ export default function OrderStatusScreen({ route, navigation }) {
                   <View
                     style={[
                       styles.statusBadge,
-                      { backgroundColor: isDarkMode ? "#064e3b" : "#D1FAE5" },
+                      {
+                        backgroundColor:
+                          orderDetails?.payment?.status === "Pagado"
+                            ? isDarkMode
+                              ? "#064e3b"
+                              : "#D1FAE5"
+                            : isDarkMode
+                              ? "#451a03"
+                              : "#FEF3C7",
+                      },
                     ]}
                   >
-                    <Text style={[styles.statusText, { color: "#10B981" }]}>
+                    <Text
+                      style={[
+                        styles.statusText,
+                        {
+                          color:
+                            orderDetails?.payment?.status === "Pagado"
+                              ? "#10B981"
+                              : "#F59E0B",
+                        },
+                      ]}
+                    >
                       {orderDetails?.payment?.status}
                     </Text>
                   </View>
@@ -944,9 +976,33 @@ export default function OrderStatusScreen({ route, navigation }) {
               </View>
             </View>
           </Animated.View>
+
+          {orderDetails?.notes && (
+            <Animated.View
+              style={[
+                styles.detailCard,
+                {
+                  backgroundColor: colors.card,
+                  opacity: fadeAnim,
+                  transform: [{ translateX: slideAnim }],
+                },
+              ]}
+            >
+              <View style={styles.detailHeader}>
+                <Icon name="notes" size={24} color={colors.primary} />
+                <Text style={[styles.detailTitle, { color: colors.text }]}>
+                  Notas adicionales
+                </Text>
+              </View>
+              <View style={styles.detailContent}>
+                <Text style={[styles.detailText, { color: colors.text }]}>
+                  {orderDetails.notes}
+                </Text>
+              </View>
+            </Animated.View>
+          )}
         </View>
 
-        {/* Actions Section */}
         <View style={styles.actionsSection}>
           <TouchableOpacity
             style={[styles.primaryButton, { backgroundColor: colors.primary }]}
@@ -955,37 +1011,6 @@ export default function OrderStatusScreen({ route, navigation }) {
             <Icon name="shopping-bag" size={24} color="#FFFFFF" />
             <Text style={styles.primaryButtonText}>Seguir comprando</Text>
           </TouchableOpacity>
-
-          <View style={styles.secondaryButtons}>
-            <TouchableOpacity
-              style={[
-                styles.secondaryButton,
-                { backgroundColor: colors.card, borderColor: colors.border },
-              ]}
-            >
-              <Icon name="receipt" size={20} color={colors.text} />
-              <Text
-                style={[styles.secondaryButtonText, { color: colors.text }]}
-              >
-                Ver recibo
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.secondaryButton,
-                { backgroundColor: colors.card, borderColor: colors.border },
-              ]}
-              onPress={handleHelpRequest}
-            >
-              <Icon name="help-outline" size={20} color={colors.text} />
-              <Text
-                style={[styles.secondaryButtonText, { color: colors.text }]}
-              >
-                Ayuda
-              </Text>
-            </TouchableOpacity>
-          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -1005,6 +1030,29 @@ const styles = StyleSheet.create({
     marginTop: 15,
     fontSize: 16,
     fontWeight: "500",
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  errorText: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginTop: 20,
+    marginBottom: 30,
+    textAlign: "center",
+  },
+  backButton: {
+    paddingHorizontal: 30,
+    paddingVertical: 15,
+    borderRadius: 10,
+  },
+  backButtonText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "600",
   },
   header: {
     borderBottomLeftRadius: 30,
@@ -1027,20 +1075,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 20,
-  },
-  backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  helpButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    justifyContent: "center",
-    alignItems: "center",
   },
   headerTitleSmall: {
     fontSize: 16,
@@ -1438,23 +1472,5 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 18,
     fontWeight: "bold",
-  },
-  secondaryButtons: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  secondaryButton: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    gap: 8,
-  },
-  secondaryButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
   },
 });

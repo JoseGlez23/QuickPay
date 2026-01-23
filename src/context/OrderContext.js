@@ -20,7 +20,7 @@ export const OrderProvider = ({ children }) => {
   const loadOrders = async () => {
     if (!user) return;
 
-    console.log("Cargando pedidos para usuario:", {
+    console.log("📦 Cargando pedidos para usuario:", {
       userRole: user.role,
       userId: user.id,
       email: user.email,
@@ -31,44 +31,46 @@ export const OrderProvider = ({ children }) => {
 
     try {
       if (user.role === "client") {
-        console.log("Buscando pedidos como CLIENTE...");
+        console.log("🛒 Buscando pedidos como CLIENTE...");
 
-        // CONSULTA SIMPLIFICADA
+        // Consulta de órdenes del cliente
         const { data: ordersData, error: ordersError } = await supabase
           .from("orders")
           .select("*")
           .eq("client_id", user.id)
           .order("created_at", { ascending: false });
 
-        console.log("RESULTADO CONSULTA ORDERS:", {
-          ordersDataCount: ordersData?.length,
-          ordersData: ordersData,
-          error: ordersError,
-        });
-
         if (ordersError) {
-          console.error("Error en consulta orders:", ordersError);
+          console.error("❌ Error en consulta orders:", ordersError);
           throw ordersError;
         }
 
         if (!ordersData || ordersData.length === 0) {
-          console.log("No hay pedidos para este cliente");
+          console.log("📭 No hay pedidos para este cliente");
           setClientOrders([]);
           setLoading(false);
           return;
         }
 
-        // OBTENER ITEMS POR SEPARADO CON TODOS LOS CAMPOS DEL PRODUCTO
+        console.log(`✅ Encontradas ${ordersData.length} órdenes`);
+
+        // Procesar cada orden para obtener items y productos
         const ordersWithItems = await Promise.all(
           ordersData.map(async (order) => {
             try {
-              // Obtener items de este pedido CON TODOS LOS CAMPOS DEL PRODUCTO
+              // CONSULTA CORREGIDA: Usamos la relación correcta
               const { data: itemsData, error: itemsError } = await supabase
                 .from("order_items")
                 .select(
                   `
-                  *,
-                  products (
+                  id,
+                  order_id,
+                  product_id,
+                  quantity,
+                  unit_price,
+                  subtotal,
+                  created_at,
+                  products!inner (
                     id,
                     name,
                     description,
@@ -78,66 +80,97 @@ export const OrderProvider = ({ children }) => {
                     stock,
                     provider_id,
                     category_id,
-                    is_active,
-                    created_at,
-                    updated_at
+                    is_active
                   )
                 `,
                 )
                 .eq("order_id", order.id);
 
-              console.log(`Items para orden ${order.id}:`, {
-                itemsCount: itemsData?.length,
-                itemsData: itemsData,
-                error: itemsError,
-              });
-
               if (itemsError) {
                 console.error(
-                  `Error items para orden ${order.id}:`,
+                  `❌ Error items para orden ${order.id}:`,
                   itemsError,
                 );
               }
 
-              // Depurar el primer producto para ver qué datos vienen
-              if (itemsData && itemsData.length > 0 && itemsData[0].product) {
-                console.log("Primer producto encontrado:", {
-                  productName: itemsData[0].product.name,
-                  productImages: itemsData[0].product.images,
-                  productPrice: itemsData[0].product.price,
-                  tieneProducto: !!itemsData[0].product,
-                });
-              }
+              console.log(`📋 Orden ${order.id}:`, {
+                itemsCount: itemsData?.length,
+                primerProducto: itemsData?.[0]?.products?.name,
+                tieneProducto: itemsData?.[0]?.products !== undefined,
+              });
 
-              // Obtener info del proveedor
+              // Obtener información del proveedor SOLO si existe provider_id
               let providerInfo = null;
               if (order.provider_id) {
-                const { data: providerData } = await supabase
-                  .from("users")
-                  .select("name, email, phone")
-                  .eq("id", order.provider_id)
-                  .single();
+                try {
+                  const { data: providerData, error: providerError } =
+                    await supabase
+                      .from("users")
+                      .select("id, name, email, phone, avatar_url")
+                      .eq("id", order.provider_id)
+                      .single();
 
-                providerInfo = providerData;
+                  if (providerError) {
+                    console.log(
+                      `ℹ️ No se encontró proveedor ${order.provider_id}:`,
+                      providerError.message,
+                    );
+                  } else {
+                    providerInfo = providerData;
+                  }
+                } catch (providerErr) {
+                  console.log(
+                    `ℹ️ Error obteniendo proveedor ${order.provider_id}:`,
+                    providerErr.message,
+                  );
+                }
               }
+
+              // Procesar items para aplanar la estructura del producto
+              const processedItems = (itemsData || []).map((item) => {
+                // El producto está anidado como 'products' (debido al !inner)
+                const product = item.products || {};
+
+                return {
+                  ...item,
+                  product: {
+                    id: product.id || item.product_id,
+                    name: product.name || "Producto sin nombre",
+                    description: product.description || "",
+                    price: product.price || item.unit_price || 0,
+                    discount_price: product.discount_price || null,
+                    images: product.images || [],
+                    stock: product.stock || 0,
+                    provider_id: product.provider_id,
+                    category_id: product.category_id,
+                    is_active: product.is_active,
+                  },
+                };
+              });
+
+              console.log(`✅ Orden ${order.id} procesada:`, {
+                itemsProcesados: processedItems.length,
+                primerProducto: processedItems[0]?.product?.name,
+              });
 
               return {
                 ...order,
-                items: itemsData || [],
+                items: processedItems,
                 orderNumber: order.order_number,
-                orderId: order.order_number || order.id,
                 total: parseFloat(order.total) || 0,
                 createdAt: order.created_at,
                 updatedAt: order.updated_at,
                 provider: providerInfo,
               };
             } catch (itemError) {
-              console.error(`Error procesando orden ${order.id}:`, itemError);
+              console.error(
+                `⚠️ Error procesando orden ${order.id}:`,
+                itemError,
+              );
               return {
                 ...order,
                 items: [],
                 orderNumber: order.order_number,
-                orderId: order.order_number || order.id,
                 total: parseFloat(order.total) || 0,
                 createdAt: order.created_at,
                 updatedAt: order.updated_at,
@@ -147,105 +180,115 @@ export const OrderProvider = ({ children }) => {
           }),
         );
 
-        console.log("Pedidos procesados:", {
+        console.log("📊 Pedidos procesados:", {
           total: ordersWithItems.length,
-          primerPedido: ordersWithItems[0],
-          tieneItems: ordersWithItems[0]?.items?.length || 0,
+          primerPedido: {
+            id: ordersWithItems[0]?.id,
+            items: ordersWithItems[0]?.items?.length,
+            primerItem: ordersWithItems[0]?.items?.[0],
+          },
         });
-
-        // Verificar estructura de datos
-        if (
-          ordersWithItems.length > 0 &&
-          ordersWithItems[0].items?.length > 0
-        ) {
-          console.log("Estructura de datos del primer item:", {
-            item: ordersWithItems[0].items[0],
-            tieneProducto: !!ordersWithItems[0].items[0].product,
-            productName: ordersWithItems[0].items[0].product?.name,
-            productImages: ordersWithItems[0].items[0].product?.images,
-          });
-        }
 
         setClientOrders(ordersWithItems);
       } else if (user.role === "provider") {
-        console.log("Buscando pedidos como PROVEEDOR...");
+        console.log("🏪 Buscando pedidos como PROVEEDOR...");
 
+        // Consulta de órdenes del proveedor
         const { data: ordersData, error: ordersError } = await supabase
           .from("orders")
           .select("*")
           .eq("provider_id", user.id)
           .order("created_at", { ascending: false });
 
-        console.log("RESULTADO CONSULTA ORDERS PROVEEDOR:", {
-          ordersDataCount: ordersData?.length,
-          error: ordersError,
-        });
-
         if (ordersError) throw ordersError;
 
         if (!ordersData || ordersData.length === 0) {
-          console.log("No hay pedidos para este proveedor");
+          console.log("📭 No hay pedidos para este proveedor");
           setProviderOrders([]);
           setLoading(false);
           return;
         }
 
+        // Procesar órdenes del proveedor
         const ordersWithItems = await Promise.all(
           ordersData.map(async (order) => {
             try {
-              // Obtener items con todos los campos del producto
+              // Consulta de items para proveedor
               const { data: itemsData } = await supabase
                 .from("order_items")
                 .select(
                   `
-                  *,
-                  products (
+                  id,
+                  order_id,
+                  product_id,
+                  quantity,
+                  unit_price,
+                  subtotal,
+                  created_at,
+                  products!inner (
                     id,
                     name,
                     description,
                     price,
                     discount_price,
                     images,
-                    stock,
-                    provider_id,
-                    category_id,
-                    is_active,
-                    created_at,
-                    updated_at
+                    stock
                   )
                 `,
                 )
                 .eq("order_id", order.id);
 
-              // Obtener info del cliente
+              // Obtener información del cliente
               let clientInfo = null;
               if (order.client_id) {
-                const { data: clientData } = await supabase
-                  .from("users")
-                  .select("name, email, phone, address")
-                  .eq("id", order.client_id)
-                  .single();
-
-                clientInfo = clientData;
+                try {
+                  const { data: clientData } = await supabase
+                    .from("users")
+                    .select("id, name, email, phone, address")
+                    .eq("id", order.client_id)
+                    .single();
+                  clientInfo = clientData;
+                } catch (err) {
+                  console.log(
+                    `ℹ️ Error obteniendo cliente ${order.client_id}:`,
+                    err.message,
+                  );
+                }
               }
+
+              // Procesar items
+              const processedItems = (itemsData || []).map((item) => {
+                const product = item.products || {};
+
+                return {
+                  ...item,
+                  product: {
+                    id: product.id || item.product_id,
+                    name: product.name || "Producto sin nombre",
+                    description: product.description || "",
+                    price: product.price || item.unit_price || 0,
+                    discount_price: product.discount_price || null,
+                    images: product.images || [],
+                    stock: product.stock || 0,
+                  },
+                };
+              });
 
               return {
                 ...order,
-                items: itemsData || [],
+                items: processedItems,
                 orderNumber: order.order_number,
-                orderId: order.order_number || order.id,
                 total: parseFloat(order.total) || 0,
                 createdAt: order.created_at,
                 updatedAt: order.updated_at,
                 client: clientInfo,
               };
             } catch (error) {
-              console.error(`Error procesando orden ${order.id}:`, error);
+              console.error(`⚠️ Error procesando orden ${order.id}:`, error);
               return {
                 ...order,
                 items: [],
                 orderNumber: order.order_number,
-                orderId: order.order_number || order.id,
                 total: parseFloat(order.total) || 0,
                 createdAt: order.created_at,
                 updatedAt: order.updated_at,
@@ -257,7 +300,7 @@ export const OrderProvider = ({ children }) => {
         setProviderOrders(ordersWithItems);
       }
     } catch (err) {
-      console.error("Error cargando pedidos:", err);
+      console.error("❌ Error cargando pedidos:", err);
       setError(err.message);
 
       if (user?.role === "client") {
@@ -273,7 +316,7 @@ export const OrderProvider = ({ children }) => {
   const subscribeToOrders = () => {
     if (!user) return;
 
-    console.log("Suscribiéndose a cambios en pedidos...");
+    console.log("🔔 Suscribiéndose a cambios en pedidos...");
 
     const channel = supabase
       .channel(`orders-${user.id}`)
@@ -289,28 +332,44 @@ export const OrderProvider = ({ children }) => {
               : `client_id=eq.${user.id}`,
         },
         (payload) => {
-          console.log("Cambio en pedidos detectado:", payload);
+          console.log("🔄 Cambio en pedidos detectado:", payload.eventType);
           loadOrders();
         },
       )
       .subscribe((status) => {
-        console.log(`Estado suscripción: ${status}`);
+        console.log(`📡 Estado suscripción: ${status}`);
       });
 
     return () => {
-      console.log("Desuscribiendo de pedidos");
+      console.log("🔕 Desuscribiendo de pedidos");
       supabase.removeChannel(channel);
     };
   };
 
   const createOrder = async (orderData, items) => {
     try {
-      console.log("Creando pedido con datos:", {
-        orderData,
+      console.log("🛍️ CREANDO PEDIDO =========================");
+      console.log("📦 Datos del pedido:", {
+        client_id: orderData.client_id,
+        provider_id: orderData.provider_id,
+        total: orderData.total,
         itemsCount: items.length,
-        items: items,
       });
 
+      console.log(
+        "📋 Items recibidos:",
+        items.map((item) => ({
+          id: item.id,
+          name: item.name,
+          quantity: item.quantity,
+          price: item.price,
+          provider_id: item.provider_id,
+          stock: item.stock,
+        })),
+      );
+
+      // 1. Crear el pedido
+      console.log("⚙️ Creando registro en tabla 'orders'...");
       const { data: order, error: orderError } = await supabase
         .from("orders")
         .insert([orderData])
@@ -318,36 +377,57 @@ export const OrderProvider = ({ children }) => {
         .single();
 
       if (orderError) {
-        console.error("Error creando orden:", orderError);
+        console.error("❌ Error creando orden:", orderError);
         throw orderError;
       }
 
-      console.log("Pedido creado:", order.id);
+      console.log("✅ Pedido creado:", order.id);
 
-      const orderItems = items.map((item) => ({
-        order_id: order.id,
-        product_id: item.id,
-        quantity: item.quantity || 1,
-        unit_price: item.price,
-      }));
+      // 2. Crear TODOS los items del pedido SIN subtotal (lo calculará PostgreSQL automáticamente)
+      console.log("📝 Creando items en 'order_items'...");
+      const orderItems = items.map((item) => {
+        const quantity = item.quantity || 1;
+        const price = item.price || 0;
 
-      console.log("Creando items:", orderItems.length);
+        // SOLO insertamos las columnas que NO son generadas
+        // PostgreSQL calculará automáticamente subtotal = quantity * unit_price
+        return {
+          order_id: order.id,
+          product_id: item.id,
+          quantity: quantity,
+          unit_price: price,
+          // NO incluir subtotal - PostgreSQL lo calculará automáticamente
+        };
+      });
+
+      console.log(
+        `📦 ${orderItems.length} items a crear (sin subtotal, será calculado automáticamente):`,
+        orderItems,
+      );
 
       const { error: itemsError } = await supabase
         .from("order_items")
         .insert(orderItems);
 
       if (itemsError) {
-        console.error("Error creando items:", itemsError);
+        console.error("❌ Error creando items:", itemsError);
         throw itemsError;
       }
 
-      console.log("Items creados");
+      console.log(
+        `✅ ${orderItems.length} items creados para pedido ${order.id}`,
+      );
 
+      // 3. Actualizar stock de TODOS los productos
+      console.log("📊 Actualizando stock de productos...");
       for (const item of items) {
         const currentStock = item.stock || 0;
         const quantity = item.quantity || 1;
         const newStock = Math.max(0, currentStock - quantity);
+
+        console.log(
+          `   Producto ${item.id}: ${currentStock} → ${newStock} (-${quantity})`,
+        );
 
         const { error: stockError } = await supabase
           .from("products")
@@ -359,25 +439,50 @@ export const OrderProvider = ({ children }) => {
 
         if (stockError) {
           console.error(
-            `Error reduciendo stock producto ${item.id}:`,
+            `⚠️ Error reduciendo stock producto ${item.id}:`,
             stockError,
-          );
-        } else {
-          console.log(
-            `Stock actualizado: ${item.id} = ${currentStock} → ${newStock}`,
           );
         }
       }
 
+      // 4. Verificar total
+      const calculatedTotal = items.reduce((sum, item) => {
+        return sum + (item.price || 0) * (item.quantity || 1);
+      }, 0);
+
+      console.log("💰 Total verificado:", {
+        calculado: calculatedTotal,
+        enOrderData: orderData.total,
+        diferencia: Math.abs(calculatedTotal - orderData.total),
+      });
+
+      // Si hay discrepancia, actualizar el total
+      if (Math.abs(calculatedTotal - orderData.total) > 0.01) {
+        console.log("🔄 Actualizando total en la orden...");
+        const { error: updateError } = await supabase
+          .from("orders")
+          .update({ total: calculatedTotal })
+          .eq("id", order.id);
+
+        if (updateError) {
+          console.error("❌ Error actualizando total:", updateError);
+        } else {
+          console.log("✅ Total actualizado:", calculatedTotal);
+        }
+      }
+
+      // 5. Recargar los pedidos
+      console.log("🔄 Recargando lista de pedidos...");
       await loadOrders();
 
+      console.log("🎉 PEDIDO CREADO EXITOSAMENTE =============");
       return {
         success: true,
-        order,
-        message: "Pedido creado exitosamente",
+        order: { ...order, total: calculatedTotal || orderData.total },
+        message: `Pedido creado exitosamente con ${items.length} productos`,
       };
     } catch (error) {
-      console.error("Error creando pedido:", error);
+      console.error("❌ Error creando pedido:", error);
       return {
         success: false,
         error: error.message || "Error desconocido al crear pedido",
@@ -387,8 +492,6 @@ export const OrderProvider = ({ children }) => {
 
   const updateOrderStatus = async (orderId, status) => {
     try {
-      console.log("Actualizando estado:", { orderId, status });
-
       const { data, error } = await supabase
         .from("orders")
         .update({
@@ -409,7 +512,7 @@ export const OrderProvider = ({ children }) => {
         message: `Estado actualizado a: ${status}`,
       };
     } catch (error) {
-      console.error("Error actualizando estado:", error);
+      console.error("❌ Error actualizando estado:", error);
       return {
         success: false,
         error: error.message,
@@ -419,8 +522,6 @@ export const OrderProvider = ({ children }) => {
 
   const cancelOrder = async (orderId, reason = "") => {
     try {
-      console.log("Cancelando pedido:", { orderId, reason });
-
       const { data: order, error: fetchError } = await supabase
         .from("orders")
         .select("*")
@@ -430,10 +531,10 @@ export const OrderProvider = ({ children }) => {
       if (fetchError) throw new Error("Pedido no encontrado");
 
       const now = new Date();
-      const cancelableUntil = new Date(order.cancelable_until);
+      const cancelableUntil = new Date(order.cancelable_until || now);
 
       if (now > cancelableUntil) {
-        throw new Error("El tiempo para cancelar ha expirado (15 horas)");
+        throw new Error("El tiempo para cancelar ha expirado");
       }
 
       if (!["pending", "paid"].includes(order.status)) {
@@ -453,6 +554,7 @@ export const OrderProvider = ({ children }) => {
 
       if (error) throw error;
 
+      // Restaurar stock
       const { data: items } = await supabase
         .from("order_items")
         .select("product_id, quantity")
@@ -468,7 +570,10 @@ export const OrderProvider = ({ children }) => {
             })
             .eq("id", item.product_id)
             .catch((err) => {
-              console.error(`Error restaurando stock ${item.product_id}:`, err);
+              console.error(
+                `❌ Error restaurando stock ${item.product_id}:`,
+                err,
+              );
             });
         }
       }
@@ -481,7 +586,7 @@ export const OrderProvider = ({ children }) => {
         message: "Pedido cancelado exitosamente",
       };
     } catch (error) {
-      console.error("Error cancelando pedido:", error);
+      console.error("❌ Error cancelando pedido:", error);
       return {
         success: false,
         error: error.message,
@@ -491,8 +596,6 @@ export const OrderProvider = ({ children }) => {
 
   const getOrderById = async (orderId) => {
     try {
-      console.log("Obteniendo pedido por ID:", orderId);
-
       const { data: order, error: orderError } = await supabase
         .from("orders")
         .select("*")
@@ -501,64 +604,82 @@ export const OrderProvider = ({ children }) => {
 
       if (orderError) throw orderError;
 
-      // Obtener items con todos los campos del producto
       const { data: items, error: itemsError } = await supabase
         .from("order_items")
         .select(
           `
-          *,
-          products (
+          id,
+          order_id,
+          product_id,
+          quantity,
+          unit_price,
+          subtotal,
+          created_at,
+          products!inner (
             id,
             name,
             description,
             price,
             discount_price,
             images,
-            stock,
-            provider_id,
-            category_id,
-            is_active,
-            created_at,
-            updated_at
+            stock
           )
         `,
         )
         .eq("order_id", orderId);
 
-      if (itemsError) {
-        console.error("Error obteniendo items:", itemsError);
-      }
-
       let clientInfo = null;
       let providerInfo = null;
 
       if (order.client_id) {
-        const { data: clientData } = await supabase
-          .from("users")
-          .select("*")
-          .eq("id", order.client_id)
-          .single()
-          .catch(() => null);
-
-        clientInfo = clientData;
+        try {
+          const { data: clientData } = await supabase
+            .from("users")
+            .select("*")
+            .eq("id", order.client_id)
+            .single();
+          clientInfo = clientData;
+        } catch (err) {
+          console.log(`ℹ️ Error obteniendo cliente:`, err.message);
+        }
       }
 
       if (order.provider_id) {
-        const { data: providerData } = await supabase
-          .from("users")
-          .select("*")
-          .eq("id", order.provider_id)
-          .single()
-          .catch(() => null);
-
-        providerInfo = providerData;
+        try {
+          const { data: providerData } = await supabase
+            .from("users")
+            .select("*")
+            .eq("id", order.provider_id)
+            .single();
+          providerInfo = providerData;
+        } catch (err) {
+          console.log(`ℹ️ Error obteniendo proveedor:`, err.message);
+        }
       }
+
+      // Procesar items
+      const processedItems = (items || []).map((item) => {
+        const product = item.products || {};
+
+        return {
+          ...item,
+          product: {
+            id: product.id || item.product_id,
+            name: product.name || "Producto sin nombre",
+            description: product.description || "",
+            price: product.price || item.unit_price || 0,
+            discount_price: product.discount_price || null,
+            images: product.images || [],
+            stock: product.stock || 0,
+          },
+        };
+      });
 
       return {
         success: true,
         order: {
           ...order,
-          items: items || [],
+          items: processedItems,
           client: clientInfo,
           provider: providerInfo,
           orderNumber: order.order_number,
@@ -566,7 +687,7 @@ export const OrderProvider = ({ children }) => {
         },
       };
     } catch (error) {
-      console.error("Error obteniendo pedido:", error);
+      console.error("❌ Error obteniendo pedido:", error);
       return {
         success: false,
         error: error.message,
